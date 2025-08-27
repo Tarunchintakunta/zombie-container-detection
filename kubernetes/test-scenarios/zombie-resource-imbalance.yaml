@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-resource-imbalance
+  namespace: test-scenarios
+  labels:
+    app: zombie-resource-imbalance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zombie-resource-imbalance
+  template:
+    metadata:
+      labels:
+        app: zombie-resource-imbalance
+    spec:
+      containers:
+      - name: zombie-resource-imbalance
+        image: python:3.9-slim
+        command:
+        - python
+        - -c
+        - |
+          import time
+          
+          # Just sleep with minimal CPU usage but large memory allocation
+          print("Starting container with large memory allocation but minimal usage")
+          while True:
+              time.sleep(60)
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi

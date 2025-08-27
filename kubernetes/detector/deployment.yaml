@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-detector
+  namespace: zombie-detector
+  labels:
+    app: zombie-detector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zombie-detector
+  template:
+    metadata:
+      labels:
+        app: zombie-detector
+    spec:
+      serviceAccountName: zombie-detector
+      containers:
+      - name: zombie-detector
+        image: python:3.9-slim
+        command:
+        - python
+        - /app/src/main.py
+        - --prometheus-url=http://prometheus.monitoring:9090
+        - --continuous
+        - --interval=300
+        - --output=text
+        - --details
+        volumeMounts:
+        - name: app-volume
+          mountPath: /app
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: app-volume
+        configMap:
+          name: zombie-detector-app

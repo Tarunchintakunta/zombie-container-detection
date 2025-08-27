@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-network-timeout
+  namespace: test-scenarios
+  labels:
+    app: zombie-network-timeout
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zombie-network-timeout
+  template:
+    metadata:
+      labels:
+        app: zombie-network-timeout
+    spec:
+      containers:
+      - name: zombie-network-timeout
+        image: python:3.9-slim
+        command:
+        - python
+        - -c
+        - |
+          import time
+          import socket
+          
+          # Simulate a container that keeps trying to connect to an unavailable service
+          while True:
+              try:
+                  # Try to connect to a non-existent service
+                  print("Attempting to connect to service...")
+                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                  sock.settimeout(2)
+                  sock.connect(("non-existent-service.test-scenarios.svc.cluster.local", 8080))
+                  sock.close()
+              except Exception as e:
+                  print(f"Connection failed: {e}")
+              
+              # Wait before trying again
+              time.sleep(180)  # 3 minutes between attempts
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi

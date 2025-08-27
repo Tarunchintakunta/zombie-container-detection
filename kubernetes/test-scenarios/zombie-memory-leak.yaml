@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-memory-leak
+  namespace: test-scenarios
+  labels:
+    app: zombie-memory-leak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zombie-memory-leak
+  template:
+    metadata:
+      labels:
+        app: zombie-memory-leak
+    spec:
+      containers:
+      - name: zombie-memory-leak
+        image: python:3.9-slim
+        command:
+        - python
+        - -c
+        - |
+          import time
+          import array
+          
+          # Simulate a memory leak
+          memory_leak = []
+          
+          while True:
+              # Allocate more memory every minute but do minimal CPU work
+              memory_leak.append(array.array('i', [0] * 1000000))  # Allocate ~4MB
+              print(f"Memory allocated: ~{len(memory_leak) * 4} MB")
+              time.sleep(60)
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 200m
+            memory: 1Gi

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zombie-stuck-process
+  namespace: test-scenarios
+  labels:
+    app: zombie-stuck-process
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zombie-stuck-process
+  template:
+    metadata:
+      labels:
+        app: zombie-stuck-process
+    spec:
+      containers:
+      - name: zombie-stuck-process
+        image: python:3.9-slim
+        command:
+        - python
+        - -c
+        - |
+          import time
+          import random
+          
+          def cpu_spike():
+              # Create a CPU spike
+              start_time = time.time()
+              while time.time() - start_time < 20:
+                  # Heavy CPU calculation
+                  [random.random() ** 2 for _ in range(1000000)]
+          
+          while True:
+              try:
+                  # Create a CPU spike
+                  cpu_spike()
+                  
+                  # Then "get stuck" with minimal CPU usage
+                  print("Process appears stuck...")
+                  time.sleep(900)  # Sleep for 15 minutes
+              except Exception as e:
+                  print(f"Error: {e}")
+                  time.sleep(60)
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
