@@ -33,8 +33,8 @@ spec:
                 sleep 30
                 kill $YES_PID 2>/dev/null
                 wait $YES_PID 2>/dev/null
-                # Long idle period (10 minutes)
-                sleep 600
+                # Long idle period (15 minutes) — stuck retry pattern
+                sleep 900
               done
           resources:
             requests:

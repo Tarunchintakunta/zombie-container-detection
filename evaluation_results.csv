@@ -1,0 +1,8 @@
+container,expected,predicted,score,correct
+zombie-memory-leak,zombie,zombie,89.99,True
+zombie-network-timeout,zombie,zombie,79.59,True
+zombie-resource-imbalance,zombie,zombie,74.98,True
+zombie-low-cpu,zombie,zombie,65.0,True
+zombie-stuck-process,zombie,zombie,60.65,True
+normal-batch,normal,normal,26.79,True
+normal-web,normal,normal,0.0,True

@@ -25,7 +25,7 @@ command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found."; exit 1; 
 
 # Step 1: Create EKS cluster
 echo ""
-echo "[1/6] Creating EKS cluster (this takes 10-15 minutes)..."
+echo "[1/7] Creating EKS cluster (this takes 10-15 minutes)..."
 if eksctl get cluster --name "$CLUSTER_NAME" --region "$REGION" 2>/dev/null; then
     echo "Cluster '$CLUSTER_NAME' already exists, skipping creation."
 else
@@ -46,12 +46,12 @@ kubectl get nodes
 
 # Step 2: Create namespaces
 echo ""
-echo "[2/6] Creating namespaces..."
+echo "[2/7] Creating namespaces..."
 kubectl apply -f kubernetes/namespaces.yaml
 
 # Step 3: Deploy RBAC
 echo ""
-echo "[3/6] Deploying RBAC..."
+echo "[3/7] Deploying RBAC..."
 kubectl apply -f kubernetes/rbac.yaml
 
 # Step 4: Deploy Prometheus
