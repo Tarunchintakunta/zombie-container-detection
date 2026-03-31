@@ -110,12 +110,30 @@ The AWS CLI lets you interact with Amazon Web Services from the command line.
 ```bash
 aws --version
 ```
+If you see something like `aws-cli/2.x.x ...`, it is already installed — skip to the next step.
 
 **If not installed:**
-- Go to https://aws.amazon.com/cli/
-- Download the installer for your OS (Windows/Mac/Linux)
-- Run the installer and follow the prompts
-- After installation, close and reopen your terminal
+
+- **Windows:**
+  1. Go to https://aws.amazon.com/cli/
+  2. Click **"Download and run the 64-bit Windows installer"**
+  3. Run the downloaded `.msi` file
+  4. Click Next → Next → Install → Finish
+  5. **Close your terminal (Command Prompt / PowerShell / Git Bash) and open a new one**
+  6. Verify: `aws --version`
+
+- **Mac:**
+  ```bash
+  brew install awscli
+  ```
+  Or download the `.pkg` installer from https://aws.amazon.com/cli/
+
+- **Linux:**
+  ```bash
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip awscliv2.zip
+  sudo ./aws/install
+  ```
 
 ### 3. Install kubectl
 
@@ -201,32 +219,77 @@ If not installed, download from https://git-scm.com/downloads
 
 ## Step-by-Step Setup and Deployment
 
-### Step 1: Configure AWS Credentials
+### Step 1: Configure AWS Credentials (Connect AWS to Your CLI)
 
-You need an AWS Access Key and Secret Key. If you are sharing an AWS account with classmates, your instructor will provide these.
+You need an **AWS Access Key ID** and **Secret Access Key** to connect the AWS CLI to your AWS account.
 
-**Run this command and enter your credentials when prompted:**
+#### Where to get your AWS credentials:
+
+**Option A — If your instructor gave you credentials:**
+Your instructor will give you an Access Key ID and Secret Access Key. Keep them safe.
+
+**Option B — If you need to create your own credentials from the AWS Console:**
+1. Open https://console.aws.amazon.com/ and log in
+2. Click your **username** (top right corner) → **Security credentials**
+3. Scroll down to **Access keys** section
+4. Click **Create access key**
+5. Select **"Command Line Interface (CLI)"**, check the confirmation box, click **Next**
+6. Click **Create access key**
+7. **IMPORTANT:** Copy both the **Access Key ID** and **Secret Access Key** now — you **cannot** see the secret key again after closing this page
+8. Click **Done**
+
+#### Connect AWS CLI to your account:
+
+**Run this command:**
 ```bash
 aws configure
 ```
 
-It will ask you 4 things:
+It will ask you 4 things — type each answer and press Enter:
 ```
-AWS Access Key ID [None]: <paste your access key here>
-AWS Secret Access Key [None]: <paste your secret key here>
+AWS Access Key ID [None]: PASTE_YOUR_ACCESS_KEY_HERE
+AWS Secret Access Key [None]: PASTE_YOUR_SECRET_KEY_HERE
 Default region name [None]: us-east-1
 Default output format [None]: json
 ```
 
-**Verify it works:**
+> **Note:** When you paste the Secret Access Key, it may look like nothing was typed (it is hidden for security). Just paste and press Enter.
+
+#### Verify the connection works:
+
 ```bash
 aws sts get-caller-identity
 ```
-You should see your AWS account number. If you get an error, your credentials are wrong — ask your instructor.
 
-> **IMPORTANT:** If someone else has previously configured AWS on the same machine, you may need to clear old credentials first:
-> - **Windows:** Delete the file `C:\Users\<YourName>\.aws\credentials` and run `aws configure` again
-> - **Mac/Linux:** Delete the file `~/.aws/credentials` and run `aws configure` again
+**If successful**, you will see something like:
+```json
+{
+    "UserId": "AIDAXXXXXXXXXXXXXXXXX",
+    "Account": "123456789012",
+    "Arn": "arn:aws:iam::123456789012:user/your-username"
+}
+```
+This means your CLI is connected to AWS. The `Account` number is your AWS account ID.
+
+**If you get an error** like `InvalidClientTokenId` or `Unable to locate credentials`:
+- Your Access Key or Secret Key is wrong — double-check and run `aws configure` again
+- Make sure you did not add extra spaces when pasting
+- If someone else used this computer before, clear old credentials first:
+  - **Windows:** Delete the file `C:\Users\<YourName>\.aws\credentials` and run `aws configure` again
+  - **Mac/Linux:** Run `rm ~/.aws/credentials` and run `aws configure` again
+
+#### Quick check commands (use anytime to verify your AWS connection):
+
+```bash
+# Check which AWS account you are connected to
+aws sts get-caller-identity
+
+# Check your configured region
+aws configure get region
+
+# List all EKS clusters in your account (empty list is OK if none created yet)
+aws eks list-clusters --region us-east-1
+```
 
 ### Step 2: Clone the Project
 
