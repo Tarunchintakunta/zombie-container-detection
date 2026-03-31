@@ -1,215 +1,207 @@
 """
-Evaluation Script for Zombie Container Detection
-
-This script evaluates the performance of the zombie container detection tool
-against known test scenarios.
+Evaluation script to measure detection accuracy against ground-truth test scenarios.
+Calculates accuracy, precision, recall, F1 score, and confusion matrix.
 """
 
 import argparse
+import csv
+import json
 import logging
-import time
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Any
-from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+import sys
 
-from detector.detector import ZombieDetector
+from .detector import ZombieDetector
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Evaluate zombie container detection performance"
-    )
-    
-    parser.add_argument(
-        "--prometheus-url",
-        default="http://prometheus.monitoring:9090",
-        help="URL of the Prometheus server"
-    )
-    
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=60,
-        help="Duration in minutes to analyze metrics for"
-    )
-    
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=70.0,
-        help="Score threshold for zombie classification"
-    )
-    
-    parser.add_argument(
-        "--output",
-        default="evaluation_results.csv",
-        help="Output file for evaluation results"
-    )
-    
-    return parser.parse_args()
+# Ground truth: container name -> expected classification
+GROUND_TRUTH = {
+    "normal-web": "normal",
+    "normal-batch": "normal",
+    "zombie-low-cpu": "zombie",
+    "zombie-memory-leak": "zombie",
+    "zombie-stuck-process": "zombie",
+    "zombie-network-timeout": "zombie",
+    "zombie-resource-imbalance": "zombie",
+}
 
-def get_ground_truth():
-    """
-    Define the ground truth for test scenarios.
-    
-    Returns:
-        Dictionary mapping container names to their true classification
-    """
-    return {
-        "normal-container": "normal",
-        "zombie-low-cpu": "zombie",
-        "zombie-memory-leak": "zombie",
-        "zombie-stuck-process": "zombie",
-        "zombie-network-timeout": "zombie",
-        "zombie-resource-imbalance": "zombie"
-    }
 
-def evaluate_detector(detector: ZombieDetector, ground_truth: Dict[str, str], 
-                     duration_minutes: int, threshold: float) -> Dict[str, Any]:
-    """
-    Evaluate the detector against ground truth.
-    
-    Args:
-        detector: ZombieDetector instance
-        ground_truth: Dictionary mapping container names to their true classification
-        duration_minutes: Duration to analyze metrics for
-        threshold: Score threshold for zombie classification
-        
-    Returns:
-        Dictionary containing evaluation metrics
-    """
-    results = []
-    
-    # Get all containers in the test-scenarios namespace
-    containers = detector._get_containers()
-    test_containers = [c for c in containers if c["namespace"] == "test-scenarios"]
-    
-    y_true = []
-    y_pred = []
-    scores = []
-    
-    # Analyze each container
+def evaluate(prometheus_url: str, namespace: str = "test-scenarios",
+             duration_minutes: int = 60) -> dict:
+    """Run evaluation against ground truth test scenarios."""
+    detector = ZombieDetector(
+        prometheus_url=prometheus_url,
+        duration_minutes=duration_minutes,
+        exclude_namespaces=["kube-system", "kube-public", "kube-node-lease", "monitoring"],
+    )
+
+    results = detector.detect()
+
+    # Filter to test namespace only
+    test_containers = [
+        c for c in results["containers"]
+        if c["namespace"] == namespace
+    ]
+
+    if not test_containers:
+        logger.error("No containers found in namespace '%s'", namespace)
+        logger.info("Found namespaces: %s",
+                     set(c["namespace"] for c in results["containers"]))
+        return {"error": "no containers found in test namespace"}
+
+    # Match against ground truth
+    tp = fp = tn = fn = 0
+    per_container = []
+
     for container in test_containers:
-        pod = container["pod"]
-        container_name = container["container"]
-        
-        # Extract deployment name from pod name (remove random suffix)
-        deployment_name = "-".join(pod.split("-")[:-2]) if "-" in pod else pod
-        
-        # Skip if not in ground truth
-        if deployment_name not in ground_truth:
+        name = container["container"]
+        predicted = container["classification"]
+        expected = GROUND_TRUTH.get(name)
+
+        if expected is None:
+            logger.warning("Container '%s' not in ground truth, skipping", name)
             continue
-        
-        # Get container metrics
-        metrics = detector.metrics_collector.get_container_metrics(
-            "test-scenarios", pod, container_name, duration_minutes
-        )
-        
-        # Get resource limits
-        resource_limits = detector.metrics_collector.get_container_resource_limits(
-            "test-scenarios", pod, container_name
-        )
-        
-        # Analyze container using heuristics
-        result = detector.heuristics.analyze_container(metrics, resource_limits)
-        
-        # Record results
-        true_class = 1 if ground_truth[deployment_name] == "zombie" else 0
-        pred_class = 1 if result["score"] >= threshold else 0
-        
-        y_true.append(true_class)
-        y_pred.append(pred_class)
-        scores.append(result["score"])
-        
-        results.append({
-            "deployment": deployment_name,
-            "pod": pod,
-            "container": container_name,
-            "true_class": ground_truth[deployment_name],
-            "pred_class": "zombie" if pred_class == 1 else "normal",
-            "score": result["score"],
-            "correct": true_class == pred_class
+
+        # Binary classification: zombie/potential_zombie vs normal
+        predicted_positive = predicted in ("zombie", "potential_zombie")
+        actual_positive = expected == "zombie"
+
+        if actual_positive and predicted_positive:
+            tp += 1
+            match = True
+        elif not actual_positive and not predicted_positive:
+            tn += 1
+            match = True
+        elif not actual_positive and predicted_positive:
+            fp += 1
+            match = False
+        else:  # actual_positive and not predicted_positive
+            fn += 1
+            match = False
+
+        per_container.append({
+            "container": name,
+            "expected": expected,
+            "predicted": predicted,
+            "score": container["score"],
+            "correct": match,
+            "rules": container.get("rules", {}),
         })
-    
+
     # Calculate metrics
-    if len(y_true) > 0 and len(y_pred) > 0:
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y_true, y_pred, average='binary'
-        )
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-        
-        metrics = {
-            "accuracy": (tp + tn) / (tp + tn + fp + fn),
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1,
+    total = tp + tn + fp + fn
+    accuracy = (tp + tn) / total if total > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+
+    evaluation = {
+        "metrics": {
+            "accuracy": round(accuracy, 4),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1_score": round(f1, 4),
+            "false_positive_rate": round(fpr, 4),
+        },
+        "confusion_matrix": {
             "true_positives": tp,
-            "false_positives": fp,
             "true_negatives": tn,
-            "false_negatives": fn
-        }
-    else:
-        metrics = {
-            "accuracy": 0,
-            "precision": 0,
-            "recall": 0,
-            "f1_score": 0,
-            "true_positives": 0,
-            "false_positives": 0,
-            "true_negatives": 0,
-            "false_negatives": 0
-        }
-    
-    return {
-        "results": results,
-        "metrics": metrics
+            "false_positives": fp,
+            "false_negatives": fn,
+        },
+        "per_container": per_container,
+        "total_containers": total,
     }
+
+    return evaluation
+
+
+def print_evaluation(evaluation: dict):
+    """Print evaluation results in a readable format."""
+    if "error" in evaluation:
+        print(f"Error: {evaluation['error']}")
+        return
+
+    print("=" * 60)
+    print("EVALUATION RESULTS")
+    print("=" * 60)
+
+    m = evaluation["metrics"]
+    print(f"\nAccuracy:           {m['accuracy']:.2%}")
+    print(f"Precision:          {m['precision']:.2%}")
+    print(f"Recall:             {m['recall']:.2%}")
+    print(f"F1 Score:           {m['f1_score']:.2%}")
+    print(f"False Positive Rate: {m['false_positive_rate']:.2%}")
+
+    cm = evaluation["confusion_matrix"]
+    print(f"\nConfusion Matrix:")
+    print(f"  True Positives:  {cm['true_positives']}")
+    print(f"  True Negatives:  {cm['true_negatives']}")
+    print(f"  False Positives: {cm['false_positives']}")
+    print(f"  False Negatives: {cm['false_negatives']}")
+
+    print(f"\nPer-Container Results:")
+    print(f"{'Container':<30} {'Expected':<12} {'Predicted':<18} {'Score':>8} {'Correct':>8}")
+    print("-" * 80)
+    for c in evaluation["per_container"]:
+        correct_str = "YES" if c["correct"] else "NO"
+        print(f"{c['container']:<30} {c['expected']:<12} {c['predicted']:<18} {c['score']:>7.1f} {correct_str:>8}")
+
+    target = 90.0
+    actual = m["accuracy"] * 100
+    print(f"\nTarget accuracy: {target}% | Actual: {actual:.1f}% | {'PASS' if actual >= target else 'BELOW TARGET'}")
+
+
+def save_csv(evaluation: dict, filename: str = "evaluation_results.csv"):
+    """Save per-container results to CSV."""
+    if "per_container" not in evaluation:
+        return
+    with open(filename, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "container", "expected", "predicted", "score", "correct",
+        ])
+        writer.writeheader()
+        for c in evaluation["per_container"]:
+            writer.writerow({
+                "container": c["container"],
+                "expected": c["expected"],
+                "predicted": c["predicted"],
+                "score": c["score"],
+                "correct": c["correct"],
+            })
+    logger.info("Results saved to %s", filename)
+
 
 def main():
-    """Main entry point."""
-    args = parse_args()
-    
-    # Create detector
-    detector = ZombieDetector(
-        prometheus_url=args.prometheus_url,
-        namespace_exclude=["kube-system", "monitoring", "zombie-detector"]
+    parser = argparse.ArgumentParser(description="Evaluate zombie detector accuracy")
+    parser.add_argument(
+        "--prometheus-url",
+        default="http://prometheus-server.monitoring.svc.cluster.local:9090",
     )
-    
-    # Get ground truth
-    ground_truth = get_ground_truth()
-    
-    # Evaluate detector
-    logger.info("Evaluating detector performance...")
-    evaluation = evaluate_detector(
-        detector, ground_truth, args.duration, args.threshold
-    )
-    
-    # Print metrics
-    metrics = evaluation["metrics"]
-    logger.info("Evaluation metrics:")
-    logger.info(f"  Accuracy: {metrics['accuracy']:.4f}")
-    logger.info(f"  Precision: {metrics['precision']:.4f}")
-    logger.info(f"  Recall: {metrics['recall']:.4f}")
-    logger.info(f"  F1 Score: {metrics['f1_score']:.4f}")
-    logger.info(f"  True Positives: {metrics['true_positives']}")
-    logger.info(f"  False Positives: {metrics['false_positives']}")
-    logger.info(f"  True Negatives: {metrics['true_negatives']}")
-    logger.info(f"  False Negatives: {metrics['false_negatives']}")
-    
-    # Save results to CSV
-    results_df = pd.DataFrame(evaluation["results"])
-    results_df.to_csv(args.output, index=False)
-    logger.info(f"Results saved to {args.output}")
-    
-    return 0
+    parser.add_argument("--namespace", default="test-scenarios")
+    parser.add_argument("--duration", type=int, default=60)
+    parser.add_argument("--output-csv", default="evaluation_results.csv")
+    parser.add_argument("--output-json", default="")
+    args = parser.parse_args()
+
+    evaluation = evaluate(args.prometheus_url, args.namespace, args.duration)
+    print_evaluation(evaluation)
+    save_csv(evaluation, args.output_csv)
+
+    if args.output_json:
+        with open(args.output_json, "w") as f:
+            json.dump(evaluation, f, indent=2)
+
+    # Exit 0 if accuracy >= 90%, else 1
+    if "metrics" in evaluation and evaluation["metrics"]["accuracy"] >= 0.90:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

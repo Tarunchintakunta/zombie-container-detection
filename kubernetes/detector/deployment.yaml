@@ -17,27 +17,21 @@ spec:
     spec:
       serviceAccountName: zombie-detector
       containers:
-      - name: zombie-detector
-        image: python:3.9-slim
-        command:
-        - python
-        - /app/src/main.py
-        - --prometheus-url=http://prometheus.monitoring:9090
-        - --continuous
-        - --interval=300
-        - --output=text
-        - --details
-        volumeMounts:
-        - name: app-volume
-          mountPath: /app
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 500m
-            memory: 512Mi
-      volumes:
-      - name: app-volume
-        configMap:
-          name: zombie-detector-app
+        - name: zombie-detector
+          image: zombie-detector:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--prometheus-url=http://prometheus-server.monitoring.svc.cluster.local:9090"
+            - "--duration=60"
+            - "--threshold=70"
+            - "--exclude-namespaces=kube-system,kube-public,kube-node-lease,monitoring,zombie-detector"
+            - "--continuous"
+            - "--interval=300"
+            - "--details"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

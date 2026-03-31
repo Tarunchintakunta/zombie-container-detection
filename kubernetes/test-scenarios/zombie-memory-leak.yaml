@@ -5,6 +5,7 @@ metadata:
   namespace: test-scenarios
   labels:
     app: zombie-memory-leak
+    scenario: zombie
 spec:
   replicas: 1
   selector:
@@ -14,29 +15,26 @@ spec:
     metadata:
       labels:
         app: zombie-memory-leak
+        scenario: zombie
     spec:
       containers:
-      - name: zombie-memory-leak
-        image: python:3.9-slim
-        command:
-        - python
-        - -c
-        - |
-          import time
-          import array
-          
-          # Simulate a memory leak
-          memory_leak = []
-          
-          while True:
-              # Allocate more memory every minute but do minimal CPU work
-              memory_leak.append(array.array('i', [0] * 1000000))  # Allocate ~4MB
-              print(f"Memory allocated: ~{len(memory_leak) * 4} MB")
-              time.sleep(60)
-        resources:
-          requests:
-            cpu: 100m
-            memory: 256Mi
-          limits:
-            cpu: 200m
-            memory: 1Gi
+        - name: zombie-memory-leak
+          image: python:3.11-slim
+          command: ["python3", "-c"]
+          args:
+            - |
+              import time
+              # Zombie pattern: gradually leaking memory with no useful CPU work
+              # Simulates a container with an unclosed connection or data structure leak
+              leaked = []
+              while True:
+                  # Leak ~2MB every 60 seconds
+                  leaked.append(bytearray(2 * 1024 * 1024))
+                  time.sleep(60)
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 1Gi

@@ -5,6 +5,7 @@ metadata:
   namespace: test-scenarios
   labels:
     app: zombie-resource-imbalance
+    scenario: zombie
 spec:
   replicas: 1
   selector:
@@ -14,24 +15,23 @@ spec:
     metadata:
       labels:
         app: zombie-resource-imbalance
+        scenario: zombie
     spec:
       containers:
-      - name: zombie-resource-imbalance
-        image: python:3.9-slim
-        command:
-        - python
-        - -c
-        - |
-          import time
-          
-          # Just sleep with minimal CPU usage but large memory allocation
-          print("Starting container with large memory allocation but minimal usage")
-          while True:
-              time.sleep(60)
-        resources:
-          requests:
-            cpu: 500m
-            memory: 1Gi
-          limits:
-            cpu: 1000m
-            memory: 2Gi
+        - name: zombie-resource-imbalance
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Zombie pattern: huge resource allocation with near-zero usage
+              # Simulates a container scaled up for a load test and never scaled down
+              while true; do
+                sleep 120
+              done
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi

@@ -5,6 +5,7 @@ metadata:
   namespace: test-scenarios
   labels:
     app: zombie-network-timeout
+    scenario: zombie
 spec:
   replicas: 1
   selector:
@@ -14,35 +15,26 @@ spec:
     metadata:
       labels:
         app: zombie-network-timeout
+        scenario: zombie
     spec:
       containers:
-      - name: zombie-network-timeout
-        image: python:3.9-slim
-        command:
-        - python
-        - -c
-        - |
-          import time
-          import socket
-          
-          # Simulate a container that keeps trying to connect to an unavailable service
-          while True:
-              try:
-                  # Try to connect to a non-existent service
-                  print("Attempting to connect to service...")
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(2)
-                  sock.connect(("non-existent-service.test-scenarios.svc.cluster.local", 8080))
-                  sock.close()
-              except Exception as e:
-                  print(f"Connection failed: {e}")
-              
-              # Wait before trying again
-              time.sleep(180)  # 3 minutes between attempts
-        resources:
-          requests:
-            cpu: 100m
-            memory: 128Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
+        - name: zombie-network-timeout
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Zombie pattern: periodic connection attempts to dead service
+              # Simulates a container retrying connections to a decommissioned endpoint
+              while true; do
+                # Try to connect to non-existent service (will fail/timeout)
+                wget -q -T 5 -O /dev/null http://dead-service.default.svc.cluster.local:8080 2>/dev/null || true
+                # Wait exactly 3 minutes between retries (regular interval)
+                sleep 180
+              done
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
