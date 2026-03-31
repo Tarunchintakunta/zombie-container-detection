@@ -23,21 +23,17 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              # Normal pattern: active web server with continuous CPU + network
               while true; do
-                # Simulate active web server: CPU work + network activity
-                i=0
-                while [ $i -lt 50000 ]; do
-                  i=$((i+1))
-                done
-                # Network activity: download a small page
-                wget -q -O /dev/null http://example.com 2>/dev/null || true
+                # CPU work: simulate request processing
+                yes > /dev/null &
+                YES_PID=$!
                 sleep 2
-                # Another burst of CPU work
-                i=0
-                while [ $i -lt 30000 ]; do
-                  i=$((i+1))
-                done
-                sleep 1
+                kill $YES_PID 2>/dev/null
+                wait $YES_PID 2>/dev/null
+                # Network activity: serve external request
+                wget -q -O /dev/null http://example.com 2>/dev/null || true
+                sleep 3
               done
           resources:
             requests:

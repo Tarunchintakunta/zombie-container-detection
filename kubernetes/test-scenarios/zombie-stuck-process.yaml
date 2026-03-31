@@ -27,13 +27,14 @@ spec:
               # Brief CPU spike then long idle, repeating
               # Simulates a process retrying a failed operation
               while true; do
-                # CPU spike: heavy computation for ~10 seconds
-                i=0
-                while [ $i -lt 200000 ]; do
-                  i=$((i+1))
-                done
-                # Long idle period (15+ minutes)
-                sleep 900
+                # CPU spike: burn CPU for 30 seconds using yes
+                yes > /dev/null &
+                YES_PID=$!
+                sleep 30
+                kill $YES_PID 2>/dev/null
+                wait $YES_PID 2>/dev/null
+                # Long idle period (10 minutes)
+                sleep 600
               done
           resources:
             requests:

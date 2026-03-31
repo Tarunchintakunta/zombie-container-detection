@@ -37,16 +37,14 @@ THRESHOLDS = {
     "memory_increase_percent": 5.0,
     "memory_leak_duration_minutes": 60,
     # Rule 3
-    "cpu_spike_percent": 10.0,
+    "cpu_spike_percent": 5.0,
     "spike_max_duration_sec": 30,
     "idle_after_spike_cpu_percent": 2.0,
-    "idle_after_spike_min_minutes": 10,
+    "idle_after_spike_min_minutes": 8,
     "min_spike_repetitions": 3,
     # Rule 4
-    "network_burst_min_bytes": 10.0,
-    "network_burst_max_bytes": 1024.0,
-    "network_interval_cv_max": 0.5,
-    "min_network_attempts": 3,
+    "network_timeout_min_rate": 1.0,       # minimum avg B/s to detect retry traffic
+    "network_timeout_max_rate": 200.0,     # maximum avg B/s (above this = real service)
     # Rule 5
     "memory_min_allocation_mb": 500,
     "memory_usage_ratio_max": 0.10,
@@ -154,6 +152,8 @@ def _rule1_sustained_low_cpu(metrics: dict) -> tuple:
         return 0.0, details
 
     # Check memory is stable or increasing (not freed)
+    # For small containers (< 10MB), percentage fluctuations are normal,
+    # so also check absolute decrease to avoid false negatives
     mem_stable = True
     mem_trend = 0.0
     if not mem.empty and len(mem) >= 2:
@@ -161,7 +161,9 @@ def _rule1_sustained_low_cpu(metrics: dict) -> tuple:
         mem_end = mem.iloc[-max(1, len(mem) // 10):].mean()
         if mem_start > 0:
             mem_trend = (mem_end - mem_start) / mem_start
-            mem_stable = mem_trend >= -0.05  # allow up to 5% decrease
+            mem_decrease_bytes = max(0, mem_start - mem_end)
+            # Stable if: less than 5% decrease OR less than 1MB absolute decrease
+            mem_stable = mem_trend >= -0.05 or mem_decrease_bytes < 1_000_000
 
     # Check network is negligible
     net_negligible = True
@@ -342,8 +344,12 @@ def _rule3_stuck_process(metrics: dict) -> tuple:
 def _rule4_network_timeout(metrics: dict) -> tuple:
     """
     Rule 4: Network Timeout Pattern (15% weight).
-    Detects periodic, low-volume network attempts with regular intervals,
-    characteristic of a container retrying connections to a dead service.
+    Detects containers with very low CPU but persistent, low-volume network
+    traffic — characteristic of a process retrying connections to a dead service.
+
+    With rate()[5m] smoothing, periodic retry bursts appear as constant low-rate
+    traffic, so we detect the pattern by: near-zero CPU + low but persistent
+    non-zero network activity + no meaningful work being done.
     """
     cpu = metrics.get("cpu", pd.Series(dtype=float))
     net_rx = metrics.get("network_rx", pd.Series(dtype=float))
@@ -351,78 +357,75 @@ def _rule4_network_timeout(metrics: dict) -> tuple:
 
     details = {"triggered": False, "reason": "insufficient data"}
 
-    if net_tx.empty or len(net_tx) < 10:
+    if net_tx.empty or len(net_tx) < 10 or cpu.empty or len(cpu) < 10:
         return 0.0, details
 
-    # CPU should be low
-    if not cpu.empty:
-        cpu_pct = cpu * 100.0
-        if cpu_pct.mean() > THRESHOLDS["low_cpu_percent"]:
-            details = {"triggered": False, "reason": "CPU too high for timeout pattern"}
-            return 0.0, details
+    cpu_pct = cpu * 100.0
 
-    # Detect network bursts: brief periods of activity in otherwise quiet network
+    # CPU must be very low (< 1%) — the container does almost no computation
+    if cpu_pct.mean() > THRESHOLDS["very_low_cpu_percent"]:
+        details = {
+            "triggered": False,
+            "reason": f"avg CPU {cpu_pct.mean():.2f}% > {THRESHOLDS['very_low_cpu_percent']}% threshold",
+        }
+        return 0.0, details
+
+    # Combine TX and RX for total network activity
+    # Use .values to avoid DatetimeIndex misalignment (RX and TX may have
+    # slightly different timestamps from Prometheus scrapes)
     net_total = net_tx
     if not net_rx.empty and len(net_rx) == len(net_tx):
-        net_total = net_rx + net_tx
+        net_total = pd.Series(net_rx.values + net_tx.values, index=net_tx.index)
 
-    # The network must be mostly silent (>70% of samples near zero) for this
-    # to be a timeout pattern rather than normal low-level traffic
-    silent_mask = net_total < THRESHOLDS["network_burst_min_bytes"]
-    silent_fraction = silent_mask.sum() / len(net_total)
-    if silent_fraction < 0.70:
+    avg_net = float(net_total.mean())
+
+    # Network must be non-zero: there IS some traffic (retry attempts)
+    if avg_net < THRESHOLDS["network_timeout_min_rate"]:
         details = {
             "triggered": False,
-            "reason": f"network not mostly silent ({silent_fraction:.0%} silent, need >70%)",
+            "reason": f"avg network {avg_net:.2f} B/s < {THRESHOLDS['network_timeout_min_rate']} B/s (no retry traffic)",
         }
         return 0.0, details
 
-    # Find bursts: points above minimum but below maximum threshold
-    burst_mask = (net_total > THRESHOLDS["network_burst_min_bytes"]) & \
-                 (net_total < THRESHOLDS["network_burst_max_bytes"])
-
-    burst_indices = np.where(burst_mask)[0]
-
-    if len(burst_indices) < THRESHOLDS["min_network_attempts"]:
+    # Network must be low-volume: not a real service doing useful work
+    if avg_net > THRESHOLDS["network_timeout_max_rate"]:
         details = {
             "triggered": False,
-            "reason": f"network bursts {len(burst_indices)} < {THRESHOLDS['min_network_attempts']} minimum",
-            "avg_network_bytes": round(net_total.mean(), 2) if not net_total.empty else 0,
+            "reason": f"avg network {avg_net:.2f} B/s > {THRESHOLDS['network_timeout_max_rate']} B/s (significant traffic)",
         }
         return 0.0, details
 
-    # Check periodicity: intervals between bursts should be regular
-    if len(burst_indices) >= 2:
-        intervals = np.diff(burst_indices)
-        if len(intervals) > 0 and np.mean(intervals) > 0:
-            cv = np.std(intervals) / np.mean(intervals)  # coefficient of variation
+    # Check that the network traffic is persistent throughout the window
+    # (not just a one-off event). Most samples should have some activity.
+    active_mask = net_total > 0.5
+    active_fraction = float(active_mask.sum()) / len(net_total)
 
-            if cv > THRESHOLDS["network_interval_cv_max"]:
-                details = {
-                    "triggered": False,
-                    "reason": f"network burst intervals not periodic (CV={cv:.2f} > {THRESHOLDS['network_interval_cv_max']})",
-                    "burst_count": len(burst_indices),
-                }
-                return 0.0, details
+    if active_fraction < 0.3:
+        details = {
+            "triggered": False,
+            "reason": f"network active only {active_fraction:.0%} of window (need >30%)",
+        }
+        return 0.0, details
 
-            # Score: higher for more bursts and more regular intervals
-            burst_score = min(1.0, len(burst_indices) / 10.0)
-            regularity_score = 1.0 - cv  # lower CV = more regular = higher score
+    # Score based on: low CPU + persistent low network = retry pattern
+    cpu_score = 1.0 - (cpu_pct.mean() / THRESHOLDS["very_low_cpu_percent"])
+    persistence_score = min(1.0, active_fraction / 0.8)
+    # Lower average network = more likely dead-service retries (just DNS lookups)
+    volume_score = 1.0 - min(1.0, avg_net / THRESHOLDS["network_timeout_max_rate"])
 
-            score = burst_score * 0.5 + regularity_score * 0.5
+    score = cpu_score * 0.4 + persistence_score * 0.3 + volume_score * 0.3
 
-            details = {
-                "triggered": True,
-                "burst_count": len(burst_indices),
-                "interval_cv": round(cv, 4),
-                "avg_interval_samples": round(np.mean(intervals), 2),
-                "burst_score": round(burst_score, 4),
-                "regularity_score": round(regularity_score, 4),
-            }
+    details = {
+        "triggered": True,
+        "avg_cpu_pct": round(float(cpu_pct.mean()), 4),
+        "avg_network_bytes_sec": round(avg_net, 2),
+        "active_fraction": round(active_fraction, 4),
+        "cpu_score": round(cpu_score, 4),
+        "persistence_score": round(persistence_score, 4),
+        "volume_score": round(volume_score, 4),
+    }
 
-            return min(1.0, max(0.0, score)), details
-
-    return 0.0, {"triggered": False, "reason": "insufficient burst data for periodicity analysis"}
+    return min(1.0, max(0.0, score)), details
 
 
 def _rule5_resource_imbalance(metrics: dict, resource_limits: dict) -> tuple:

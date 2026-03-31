@@ -23,15 +23,16 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              # Normal pattern: periodic batch processing with heavy CPU usage
               while true; do
-                # Simulate batch job: heavy CPU every 10 minutes, idle between
                 echo "Starting batch processing..."
-                i=0
-                while [ $i -lt 500000 ]; do
-                  i=$((i+1))
-                done
+                yes > /dev/null &
+                YES_PID=$!
+                sleep 60
+                kill $YES_PID 2>/dev/null
+                wait $YES_PID 2>/dev/null
                 echo "Batch complete, sleeping..."
-                sleep 600
+                sleep 540
               done
           resources:
             requests:
