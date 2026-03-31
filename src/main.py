@@ -9,6 +9,7 @@ import sys
 import time
 
 from .detector import ZombieDetector, format_text_output, format_json_output
+from .exporter import start_metrics_server, update_metrics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,6 +56,12 @@ def parse_args():
         help="Show detailed per-rule breakdown",
     )
     parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=8080,
+        help="Port for Prometheus metrics exporter (default: %(default)s)",
+    )
+    parser.add_argument(
         "--continuous",
         action="store_true",
         help="Run in continuous monitoring mode",
@@ -79,10 +86,13 @@ def main():
     )
 
     if args.continuous:
+        # Start Prometheus metrics exporter for Grafana
+        start_metrics_server(args.metrics_port)
         logger.info("Starting continuous monitoring (interval: %ds)", args.interval)
         while True:
             try:
                 results = detector.detect(threshold=args.threshold)
+                update_metrics(results)
                 if args.output == "json":
                     print(format_json_output(results))
                 else:

@@ -56,16 +56,27 @@ kubectl apply -f kubernetes/rbac.yaml
 
 # Step 4: Deploy Prometheus
 echo ""
-echo "[4/6] Deploying Prometheus monitoring..."
+echo "[4/7] Deploying Prometheus monitoring..."
 kubectl apply -f kubernetes/prometheus/config.yaml
 kubectl apply -f kubernetes/prometheus/deployment.yaml
 
 echo "Waiting for Prometheus to be ready..."
 kubectl wait --for=condition=available --timeout=120s deployment/prometheus-server -n monitoring
 
-# Step 5: Deploy test scenarios
+# Step 5: Deploy Grafana
 echo ""
-echo "[5/6] Deploying test scenarios..."
+echo "[5/7] Deploying Grafana with auto-provisioned dashboard..."
+kubectl apply -f kubernetes/grafana/datasource.yaml
+kubectl apply -f kubernetes/grafana/dashboard-provider.yaml
+kubectl apply -f kubernetes/grafana/dashboard.yaml
+kubectl apply -f kubernetes/grafana/deployment.yaml
+
+echo "Waiting for Grafana to be ready..."
+kubectl wait --for=condition=available --timeout=120s deployment/grafana -n monitoring
+
+# Step 6: Deploy test scenarios
+echo ""
+echo "[6/7] Deploying test scenarios..."
 for f in kubernetes/test-scenarios/*.yaml; do
     kubectl apply -f "$f"
 done
@@ -77,9 +88,9 @@ echo ""
 echo "Test scenario pods:"
 kubectl get pods -n test-scenarios -o wide
 
-# Step 6: Build and deploy detector
+# Step 7: Build and deploy detector
 echo ""
-echo "[6/6] Building and deploying zombie detector..."
+echo "[7/7] Building and deploying zombie detector..."
 
 # Build Docker image
 docker build -t zombie-detector:latest .
@@ -112,9 +123,13 @@ echo "metrics to accumulate before running the detector or evaluation."
 echo ""
 echo "Useful commands:"
 echo "  kubectl get pods -n test-scenarios      # Check test pods"
-echo "  kubectl get pods -n monitoring           # Check Prometheus"
+echo "  kubectl get pods -n monitoring           # Check Prometheus & Grafana"
 echo "  kubectl get pods -n zombie-detector      # Check detector"
 echo "  kubectl logs -n zombie-detector deployment/zombie-detector  # View detection results"
+echo ""
+echo "To access Grafana dashboard:"
+echo "  kubectl port-forward -n monitoring svc/grafana 3000:3000"
+echo "  Open http://localhost:3000 (admin/admin)"
 echo ""
 echo "To port-forward Prometheus:"
 echo "  kubectl port-forward -n monitoring svc/prometheus-server 9090:9090"

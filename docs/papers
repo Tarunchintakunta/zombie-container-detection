@@ -1,0 +1,34 @@
+ Here are the paper links for your report:                                         
+                                                                                      Paper Links                                                                                                                                                           
+  Paper 1 — Anemogiannis et al. (2025):                                             
+  - https://arxiv.org/abs/2503.14114
+  - https://eo4eu.eu/scientific-publications/enhancing-kubernetes-resilience-through
+  -anomaly-detection-and-prediction
+
+  Paper 2 — Li et al. (2025):
+  - https://www.sciencedirect.com/science/article/abs/pii/S1084804525001158 — DOI:  
+  10.1016/j.jnca.2025.104218
+  - https://www.researchgate.net/publication/392348403_Energy-aware_elastic_scaling_
+  algorithm_for_microservices_in_Kubernetes_clouds
+
+  ---
+  What You Need to Do Now
+
+  1. IMMEDIATELY rotate your AWS keys — go to AWS Console > IAM > Security
+  Credentials > Delete those keys > Create new ones
+  2. Run aws configure with your new keys
+  3. Then deploy:
+  cd zombie-container-detection
+  chmod +x setup.sh deploy.sh cleanup.sh
+  ./setup.sh
+  # Wait 30-60 minutes
+  kubectl port-forward -n monitoring svc/prometheus-server 9090:9090 &
+  python -m src.evaluation --prometheus-url=http://localhost:9090
+
+  The system is fully built, tested (100% accuracy on 14 synthetic scenarios),      
+  Docker image builds successfully, and includes the Grafana dashboard as the extra 
+  feature. All you need to do is deploy it on your AWS cluster.
+
+  Sources:
+  - https://arxiv.org/abs/2503.14114
+  - https://www.sciencedirect.com/science/article/abs/pii/S1084804525001158

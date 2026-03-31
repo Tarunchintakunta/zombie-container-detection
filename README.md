@@ -30,7 +30,8 @@ Each container receives a composite score (0-100):
 ```
 Kubernetes Cluster
 ├── monitoring namespace
-│   └── Prometheus (scrapes cAdvisor metrics every 15s)
+│   ├── Prometheus (scrapes cAdvisor metrics every 15s)
+│   └── Grafana (auto-provisioned dashboard for real-time visibility)
 ├── test-scenarios namespace
 │   ├── normal-web (active web server)
 │   ├── normal-batch (periodic batch processor)
@@ -40,8 +41,21 @@ Kubernetes Cluster
 │   ├── zombie-network-timeout (dead service retries)
 │   └── zombie-resource-imbalance (over-provisioned idle)
 └── zombie-detector namespace
-    └── Detector (queries Prometheus, applies 5 rules)
+    └── Detector (queries Prometheus, applies 5 rules, exports metrics)
 ```
+
+## Extra Feature: Grafana Dashboard
+
+Beyond the paper requirements, this system includes an **auto-provisioned Grafana dashboard** that provides real-time operational visibility — a gap not addressed by either Anemogiannis et al. (2025) or Li et al. (2025).
+
+The dashboard includes:
+- **Detection Summary** — stat panels showing total containers, zombies, potential zombies, and normal counts
+- **Zombie Scores Over Time** — time series chart with threshold lines (60=zombie, 30=potential)
+- **Per-Rule Breakdown** — 5 individual charts showing each heuristic rule's score over time
+- **Raw Container Metrics** — CPU usage, memory usage, and network activity for test containers
+- **Classification Distribution** — donut chart showing zombie/potential/normal proportions
+
+Access: `kubectl port-forward -n monitoring svc/grafana 3000:3000` then open http://localhost:3000 (admin/admin)
 
 ## Prerequisites
 
@@ -86,7 +100,15 @@ kubectl port-forward -n monitoring svc/prometheus-server 9090:9090 &
 # Open http://localhost:9090 and query: container_cpu_usage_seconds_total
 ```
 
-### 4. Run the detector
+### 4. Access Grafana Dashboard
+
+```bash
+kubectl port-forward -n monitoring svc/grafana 3000:3000 &
+# Open http://localhost:3000 (login: admin/admin)
+# Dashboard is auto-loaded: "Zombie Container Detection Dashboard"
+```
+
+### 5. Run the detector
 
 ```bash
 # Port-forward Prometheus
@@ -99,7 +121,7 @@ python -m src.main --prometheus-url=http://localhost:9090 --details
 python -m src.main --prometheus-url=http://localhost:9090 --output=json
 ```
 
-### 5. Run evaluation
+### 6. Run evaluation
 
 ```bash
 python -m src.evaluation --prometheus-url=http://localhost:9090
@@ -118,6 +140,7 @@ python -m src.main [options]
   --exclude-namespaces NS  Comma-separated namespaces to skip
   --output {text,json}     Output format (default: text)
   --details                Show per-rule breakdown
+  --metrics-port PORT      Prometheus exporter port (default: 8080)
   --continuous             Run in continuous monitoring mode
   --interval SECONDS       Interval between checks (default: 300)
 ```
@@ -131,12 +154,14 @@ zombie-container-detection/
 │   ├── detector.py           # Detection orchestrator
 │   ├── heuristics.py         # 5 heuristic rules engine
 │   ├── metrics_collector.py  # Prometheus PromQL queries
+│   ├── exporter.py           # Prometheus metrics exporter for Grafana
 │   └── evaluation.py         # Accuracy evaluation
 ├── kubernetes/
 │   ├── namespaces.yaml       # Namespace definitions
 │   ├── rbac.yaml             # ServiceAccount & ClusterRole
 │   ├── prometheus/           # Prometheus deployment
-│   ├── detector/             # Detector deployment
+│   ├── grafana/              # Grafana with auto-provisioned dashboard
+│   ├── detector/             # Detector deployment + service
 │   └── test-scenarios/       # 7 test pods (2 normal + 5 zombie)
 ├── Dockerfile                # Container image for detector
 ├── setup.sh                  # Full AWS EKS setup
