@@ -9,7 +9,8 @@ import sys
 import time
 
 from .detector import ZombieDetector, format_text_output, format_json_output
-from .exporter import start_metrics_server, update_metrics
+from .exporter import start_metrics_server, update_metrics, update_energy_metrics
+from .energy_impact import calculate_cluster_impact
 
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +90,14 @@ def main():
         # Start Prometheus metrics exporter for Grafana
         start_metrics_server(args.metrics_port)
         logger.info("Starting continuous monitoring (interval: %ds)", args.interval)
+
+        # Export energy waste metrics for dashboard
+        try:
+            energy = calculate_cluster_impact()
+            update_energy_metrics(energy)
+        except Exception as e:
+            logger.warning("Energy metrics update failed (non-critical): %s", e)
+
         while True:
             try:
                 results = detector.detect(threshold=args.threshold)

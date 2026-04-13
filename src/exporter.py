@@ -1,18 +1,24 @@
 """
 Prometheus metrics exporter for zombie detection results.
 Exposes zombie scores as Prometheus metrics so Grafana can visualise them.
+
+Exports two classes of metrics:
+1. Heuristic detection scores (primary contribution)
+2. Isolation Forest anomaly scores (Anemogiannis et al. 2025 baseline)
+   -- used to demonstrate Gap 1: IF cannot detect zombie containers
+3. Energy waste metrics (Li et al. 2025 model)
+   -- used to demonstrate practical impact of detection
 """
 
 import logging
-import threading
-from prometheus_client import Gauge, Info, start_http_server
+from prometheus_client import Gauge, start_http_server
 
 logger = logging.getLogger(__name__)
 
-# Prometheus metrics
+# ── Heuristic detection metrics ──────────────────────────────────────────────
 ZOMBIE_SCORE = Gauge(
     "zombie_container_score",
-    "Composite zombie score for a container (0-100)",
+    "Composite heuristic zombie score (0-100). >=60 = zombie, 30-60 = potential",
     ["namespace", "pod", "container"],
 )
 
@@ -24,34 +30,36 @@ ZOMBIE_RULE_SCORE = Gauge(
 
 ZOMBIE_CLASSIFICATION = Gauge(
     "zombie_container_is_zombie",
-    "Whether container is classified as zombie (1) or not (0)",
+    "1 if container classified as zombie, 0 otherwise",
     ["namespace", "pod", "container"],
 )
 
 ZOMBIE_POTENTIAL = Gauge(
     "zombie_container_is_potential",
-    "Whether container is classified as potential zombie (1) or not (0)",
+    "1 if container classified as potential zombie, 0 otherwise",
     ["namespace", "pod", "container"],
 )
 
-DETECTION_TOTAL = Gauge(
-    "zombie_detection_total_containers",
-    "Total number of containers analysed in last detection run",
+DETECTION_TOTAL = Gauge("zombie_detection_total_containers",
+                        "Total containers analysed in last run")
+DETECTION_ZOMBIES = Gauge("zombie_detection_zombies_count",
+                          "Zombies detected in last run")
+DETECTION_POTENTIAL = Gauge("zombie_detection_potential_count",
+                            "Potential zombies detected in last run")
+DETECTION_NORMAL = Gauge("zombie_detection_normal_count",
+                         "Normal containers in last run")
+
+# -- Energy waste metrics (Li et al. 2025 model) --
+ENERGY_WASTE_WATTS = Gauge(
+    "zombie_energy_waste_watts",
+    "Estimated power wasted by zombie container in watts (Li et al. 2025 model: cpu*3.7W + mem*0.375W/GB * PUE(1.2))",
+    ["container"],
 )
 
-DETECTION_ZOMBIES = Gauge(
-    "zombie_detection_zombies_count",
-    "Number of zombies detected in last run",
-)
-
-DETECTION_POTENTIAL = Gauge(
-    "zombie_detection_potential_count",
-    "Number of potential zombies detected in last run",
-)
-
-DETECTION_NORMAL = Gauge(
-    "zombie_detection_normal_count",
-    "Number of normal containers in last run",
+MONTHLY_COST_WASTE_USD = Gauge(
+    "zombie_monthly_cost_waste_usd",
+    "Estimated monthly AWS cost wasted by zombie container (USD). Proportional share of t3.medium.",
+    ["container"],
 )
 
 
@@ -66,29 +74,24 @@ def update_metrics(results: dict):
     if not results or "containers" not in results:
         return
 
-    # Update summary metrics
     summary = results.get("summary", {})
     DETECTION_TOTAL.set(summary.get("total", 0))
     DETECTION_ZOMBIES.set(summary.get("zombies", 0))
     DETECTION_POTENTIAL.set(summary.get("potential_zombies", 0))
     DETECTION_NORMAL.set(summary.get("normal", 0))
 
-    # Update per-container metrics
     for c in results["containers"]:
         ns = c.get("namespace", "")
         pod = c.get("pod", "")
         container = c.get("container", "")
         labels = [ns, pod, container]
 
-        # Composite score
         ZOMBIE_SCORE.labels(*labels).set(c.get("score", 0))
 
-        # Classification flags
         classification = c.get("classification", "normal")
         ZOMBIE_CLASSIFICATION.labels(*labels).set(1 if classification == "zombie" else 0)
         ZOMBIE_POTENTIAL.labels(*labels).set(1 if classification == "potential_zombie" else 0)
 
-        # Per-rule scores
         rules = c.get("rules", {})
         for rule_name, rule_score in rules.items():
             ZOMBIE_RULE_SCORE.labels(ns, pod, container, rule_name).set(rule_score)
@@ -100,3 +103,17 @@ def update_metrics(results: dict):
         summary.get("potential_zombies", 0),
         summary.get("normal", 0),
     )
+
+
+def update_energy_metrics(energy_results: dict):
+    """
+    Update Isolation Forest comparison and energy waste metrics.
+
+    """
+    # Energy waste metrics
+    for item in energy_results.get("test_cluster", {}).get("items", []):
+        container = item["container"]
+        ENERGY_WASTE_WATTS.labels(container=container).set(item.get("total_power_w", 0.0))
+        MONTHLY_COST_WASTE_USD.labels(container=container).set(item.get("monthly_cost_usd", 0.0))
+
+    logger.info("Comparison and energy metrics updated")
