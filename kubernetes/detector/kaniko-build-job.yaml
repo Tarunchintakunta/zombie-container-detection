@@ -38,10 +38,15 @@ roleRef:
 # and pushes to ECR. No local Docker required.
 #
 # Before applying:
-#   - replace ${ECR_REGISTRY} with the account's ECR registry hostname
-#   - replace ${GIT_REPO} with the source repo URL (must be reachable from the cluster)
-#   - ensure the cluster's nodes have IAM permission to push to ECR (eksctl
-#     create cluster grants AmazonEC2ContainerRegistryPowerUser by default)
+#   - The kaniko-builder ServiceAccount must be annotated with an IAM role
+#     ARN that has ECR push + S3 read permission (IRSA). Run:
+#         eksctl create iamserviceaccount --cluster zombie-detector-cluster \
+#           --namespace build --name kaniko-builder \
+#           --attach-policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser \
+#           --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
+#           --override-existing-serviceaccounts --approve
+#   - The source bundle must be uploaded to s3://${SOURCE_BUCKET}/zombie-source.tar.gz
+#   - ${ECR_REGISTRY} substituted via envsubst at apply time
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -49,6 +54,7 @@ metadata:
   namespace: build
 spec:
   backoffLimit: 1
+  ttlSecondsAfterFinished: 600
   template:
     spec:
       serviceAccountName: kaniko-builder
@@ -57,11 +63,14 @@ spec:
         - name: kaniko
           image: gcr.io/kaniko-project/executor:latest
           args:
-            - "--context=git://github.com/Tarunchintakunta/zombie-container-detection.git#refs/heads/main"
+            - "--context=s3://${SOURCE_BUCKET}/zombie-source.tar.gz"
             - "--dockerfile=Dockerfile"
             - "--destination=${ECR_REGISTRY}/zombie-detector:latest"
-            - "--cache=true"
+            - "--cache=false"
             - "--verbosity=info"
+          env:
+            - name: AWS_REGION
+              value: us-east-1
           resources:
             requests:
               cpu: 200m
