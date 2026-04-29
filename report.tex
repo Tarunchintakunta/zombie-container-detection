@@ -827,6 +827,41 @@ hundred-pod-cluster projection and Li et al.\ formula reference.}
 \label{fig:dash-energy}
 \end{figure}
 
+The same numbers, isolated as standalone Plotly exports for clarity, are
+shown in Figures~\ref{fig:cost-bar} and~\ref{fig:power-pie}; the
+hundred-pod cluster projection is reproduced in
+Figure~\ref{fig:cluster-proj}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{fig19_cost_per_zombie_bar.png}
+\caption{Per-zombie monthly cost (USD) calculated with Li et al.'s
+energy formula and the on-demand \texttt{t3.medium} hourly rate. The
+\texttt{zombie-resource-imbalance} container dominates because it
+requests 0.5 vCPU and 0.5\,GB while consuming under two per cent of
+either.}
+\label{fig:cost-bar}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.65\textwidth]{fig20_power_waste_pie.png}
+\caption{Distribution of standing power waste across the five canonical
+zombies. \texttt{zombie-resource-imbalance} accounts for nearly two
+thirds of the total because of its over-provisioned request envelope.}
+\label{fig:power-pie}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig21_cluster_projection_100pod.png}
+\caption{Projection from the five-zombie test set to a hundred-pod
+cluster using Jindal et al.'s thirty-per-cent zombie rate: thirty
+zombies, \$68.58 per month, \$822.96 per year, 3.74\,kg of CO\textsubscript{2}
+per month.}
+\label{fig:cluster-proj}
+\end{figure}
+
 \subsection{Threshold-versus-heuristic comparison}
 
 The naive baseline considered in this work is the static threshold
@@ -863,6 +898,32 @@ naive threshold cannot avoid, and the false-negative on
 \texttt{zombie-stuck-process} that the naive threshold misses but Rule~3
 catches.}
 \label{fig:dash-vs}
+\end{figure}
+
+Figure~\ref{fig:per-container} shows the per-container row-level outcome
+for the canonical seven-pod set, and Figure~\ref{fig:perf-cards} shows
+the aggregate metric cards. On this canonical set the heuristic reports
+one-hundred-per-cent accuracy, but as Section~\ref{sec:results} has
+already shown, the same heuristic drops to seventy-five-per-cent
+accuracy when the five adversarial probes are included.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig22_per_container_comparison_table.png}
+\caption{Per-container heuristic-versus-naive comparison on the
+canonical seven-pod set. The naive threshold misclassifies
+\texttt{normal-batch} (false positive during its sleep window) and
+misses \texttt{zombie-stuck-process} (its periodic spikes briefly
+exceed five per cent), where the heuristic gets both correct.}
+\label{fig:per-container}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig23_performance_comparison_metrics.png}
+\caption{Aggregate metric cards and grouped bar chart for the
+canonical-set comparison.}
+\label{fig:perf-cards}
 \end{figure}
 
 The naive baseline incorrectly flags \texttt{normal-batch} during its

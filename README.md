@@ -73,6 +73,13 @@ Every claim in this README is backed by either a captured screenshot or a genera
 | 16 | `images/fig16_terminal_detection_scores.png` | Per-pod headline scores from a single detection cycle | TP/FP/TN evidence |
 | 17 | `images/fig17_terminal_audit_trail.png` | Per-rule details (avg_cpu_pct, low_cpu_minutes, mem_trend_pct, ...) | Interpretability — exact metric values per detection |
 | 18 | `images/fig18_terminal_prometheus.png` | Prometheus pod + service in monitoring namespace | Monitoring stack live |
+| 19 | `images/fig19_cost_per_zombie_bar.png` | Plotly bar chart: monthly AWS cost per zombie ($1.50 / $0.94 / $0.75 / $0.75 / $7.49) | Per-zombie financial impact (Li et al. model) |
+| 20 | `images/fig20_power_waste_pie.png` | Plotly pie chart: power-waste distribution across the 5 zombies | "Where does the wasted power go?" |
+| 21 | `images/fig21_cluster_projection_100pod.png` | 100-pod-cluster projection: 30 zombies, $68.58/mo, $822.96/yr, 3.74 kg CO2/mo | Scale-out impact using Jindal et al. (2023) 30 % rate |
+| 22 | `images/fig22_per_container_comparison_table.png` | Per-container side-by-side: heuristic vs naive threshold for the canonical 7 set | Concrete proof the heuristic beats the baseline |
+| 23 | `images/fig23_performance_comparison_metrics.png` | Performance metric cards + grouped bar (heuristic 100 % / 100 % vs naive 71 % / 80 %) on the canonical 7 set | Aggregate baseline comparison |
+| 24 | `images/fig24_composite_score_focused.png` | Cropped focused view of the composite-score bar chart for all 12 pods | Cleaner alternative to fig02 for print |
+| 25 | `images/fig25_rule_heatmap_focused.png` | Cropped focused view of the rule-activation heatmap | Cleaner alternative to fig03 for print |
 
 Two scripts regenerate the captured evidence on demand:
 
