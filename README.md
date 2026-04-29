@@ -49,8 +49,44 @@ The 75 % aggregate accuracy is unchanged by the YAML corrections (the count of F
 
 ---
 
+## Evidence (figures used in the report)
+
+Every claim in this README is backed by either a captured screenshot or a generated diagram in `images/`. The mapping below answers the professor's checklist:
+
+| # | File | Shows | Answers |
+|---|---|---|---|
+| 1 | `images/fig01_system_architecture.png` | End-to-end data flow: cAdvisor → Prometheus → detector → dashboard | "How is Prometheus running in the backend?" |
+| 2 | `images/fig02_dashboard_live_detection.png` | Score bar chart for all 12 pods | Live detection results overview |
+| 3 | `images/fig03_dashboard_rule_heatmap.png` | Per-rule activation heatmap (12 pods × 5 rules) | "Show TP, FP, and which rule fired" |
+| 4 | `images/fig04_dashboard_threshold_vs_heuristic.png` | Naive threshold vs heuristic comparison | Baseline comparison |
+| 5 | `images/fig05_dashboard_energy_cost_impact.png` | Per-zombie cost from Li et al.'s energy formula | "What are we gaining" |
+| 6 | `images/fig06_dashboard_experimental_design.png` | Why 7+5=12 test containers | Test methodology |
+| 7 | `images/fig07_dashboard_failure_modes.png` | Adversarial probe table + confusion matrix | "Show it failing — TP/FP/FN/TN" |
+| 8 | `images/fig08_prometheus_scrape_targets.png` | Prometheus UI with all 4 scrape jobs UP | "How is it scraping the data" |
+| 9 | `images/fig09_aws_console_eks_clusters.png` | AWS EKS console listing `zombie-detector-cluster` Active | Cluster exists in AWS |
+| 10 | `images/fig10_aws_console_ec2_instances.png` | EC2 console showing 2× t4g.small Running | Worker nodes are free-tier ARM instances |
+| 11 | `images/fig11_aws_console_cluster_details.png` | EKS cluster Overview tab (version 1.34, EKS provider) | Cluster details |
+| 12 | `images/fig12_terminal_get_nodes.png` | `kubectl get nodes -o wide` | 2 nodes Ready, K8s 1.34, ARM64 |
+| 13 | `images/fig13_terminal_get_pods_all.png` | `kubectl get pods -A` | 17 pods, all 1/1 Running |
+| 14 | `images/fig14_terminal_get_pods_test_scenarios.png` | 12 test pods with their IPs and node assignments | Test set inventory |
+| 15 | `images/fig15_terminal_get_pods_detector.png` | The detector pod | Detection engine running |
+| 16 | `images/fig16_terminal_detection_scores.png` | Per-pod headline scores from a single detection cycle | TP/FP/TN evidence |
+| 17 | `images/fig17_terminal_audit_trail.png` | Per-rule details (avg_cpu_pct, low_cpu_minutes, mem_trend_pct, ...) | Interpretability — exact metric values per detection |
+| 18 | `images/fig18_terminal_prometheus.png` | Prometheus pod + service in monitoring namespace | Monitoring stack live |
+
+Two scripts regenerate the captured evidence on demand:
+
+| Script | Output |
+|---|---|
+| `python generate_architecture_diagram.py` | `images/fig01_system_architecture.png` |
+| `python capture_report_images.py` | `images/fig02..fig08` (Selenium-driven dashboard tabs + Prometheus UI) and the text artefacts under `images/artifacts/` |
+| `.\show_evidence.ps1` (PowerShell) | runs the 9 commands behind `fig12..fig18` so you can capture them yourself one at a time |
+
+---
+
 ## Table of Contents
 
+0. [Evidence (figures used in the report)](#evidence-figures-used-in-the-report)
 1. [What is This Project?](#what-is-this-project)
 2. [How It Works](#how-it-works)
 3. [Prometheus Backend Pipeline](#prometheus-backend-pipeline)
@@ -357,9 +393,10 @@ Beyond basic detection, we added **3 major features** to demonstrate impact and 
 - Results:
   - **False Positive on `normal-batch`**: This container is legitimately idle (batch job waits for cron), but naive threshold flags it
   - **False Negative on `zombie-stuck-process`**: Periodic retries look like activity, naive rule misses it
-- Your heuristic: **100% correct on all 7 containers**
+- Your heuristic on the canonical 7-container set: **100% correct (5 zombies + 2 normals)**
+- Your heuristic on the combined 12-container set (canonical + 5 adversarial probes): **75% accuracy / 80% F1 / 100% recall / 50% FPR**, measured live on EKS
 
-**Why it matters:** Shows you've solved a real problem. The naive approach fails; yours works.
+**Why it matters:** Shows the heuristic clearly beats a naive threshold (75% vs 58% accuracy) while honestly exposing its real-world limits — every real zombie is caught, but three legitimately idle workloads are also flagged.
 
 ### Feature 2: Energy & Cost Impact Analysis (Tab 3 of Dashboard)
 **Purpose:** Quantify the business value using Li et al. (2025) energy model.
@@ -954,7 +991,7 @@ http://aacc1a9a5c1a047cfbd3f9976fb1defb-636586278.us-east-1.elb.amazonaws.com
 - Comparison: naive rule `CPU < 5% for 30min` vs your heuristic
 - Shows false positive on `normal-batch` (naive wrongly flags it)
 - Shows false negative on `zombie-stuck-process` (naive misses it)
-- Your heuristic: 100% accuracy
+- Your heuristic: 100% on canonical 7; 75% / 80% F1 / 100% recall on combined 12 (live cluster)
 
 **Tab 3 — Energy & Cost Impact**
 - Power consumption per zombie (Li et al. 2025 model)
