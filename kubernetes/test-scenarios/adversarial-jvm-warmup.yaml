@@ -26,16 +26,22 @@ spec:
           args:
             - |
               # ADVERSARIAL: simulates JVM-style class-loading / cache warmup.
-              # Memory grows monotonically from 60MB to ~190MB (>200% growth)
-              # over 60 minutes while CPU stays near zero (just allocation,
-              # no processing). This pattern is identical to a memory leak,
-              # so Rule 2 fires -> FALSE POSITIVE.
+              # Memory grows monotonically over many hours while CPU stays
+              # near zero (just allocation, no processing). This pattern is
+              # identical to a memory leak, so Rule 2 fires -> FALSE POSITIVE.
+              #
+              # Growth: +1MB/min for 240 min (4 h), reaching ~270MB. We grow
+              # for longer than the 60-min lookback window so that Rule 2
+              # always sees a fresh increase >5% in any window during the
+              # warmup phase. (Previous design grew for 60 min then stopped,
+              # which made Rule 1 fire after warmup ended instead of Rule 2
+              # firing during it.)
               import time
               cache = []
-              for i in range(60):
-                  cache.append(bytearray(2 * 1024 * 1024))  # +2MB / minute
+              for i in range(240):
+                  cache.append(bytearray(1 * 1024 * 1024))  # +1MB / minute
                   time.sleep(60)
-              # After warmup, sit idle indefinitely (real app would now serve traffic)
+              # After 4 hours, sit idle (real app would now be serving traffic)
               while True:
                   time.sleep(3600)
           resources:

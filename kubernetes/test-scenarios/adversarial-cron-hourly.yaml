@@ -27,17 +27,21 @@ spec:
             - |
               # ADVERSARIAL: legitimate cron-style workload with a cycle LONGER
               # than the detector's 60-minute analysis window.
-              # 90 sec CPU burst, then 70 minutes idle, repeat.
-              # Within any single 60-min window, the spike is often ABSENT,
-              # so the heuristic sees a flat-line near-zero CPU profile that
-              # matches Rule 1 -> FALSE POSITIVE.
+              # 90 sec CPU burst, then 120 minutes idle, repeat.
+              # Cycle period = 121.5 min. With a 60-min lookback window, the
+              # burst is OUTSIDE the window for ~50% of cycles, so the
+              # heuristic sees a flat-line near-zero CPU profile matching
+              # Rule 1 -> FALSE POSITIVE about half the time.
+              # (A 70-min idle was the previous design but the burst usually
+              # fell inside the 60-min window, giving Rule 1 the spike-evidence
+              # it needed to correctly exclude the pod.)
               while true; do
                 yes > /dev/null &
                 YES_PID=$!
                 sleep 90
                 kill $YES_PID 2>/dev/null
                 wait $YES_PID 2>/dev/null
-                sleep 4200
+                sleep 7200
               done
           resources:
             requests:

@@ -1,13 +1,9 @@
 """
 Prometheus metrics exporter for zombie detection results.
-Exposes zombie scores as Prometheus metrics so Grafana can visualise them.
 
-Exports two classes of metrics:
-1. Heuristic detection scores (primary contribution)
-2. Isolation Forest anomaly scores (Anemogiannis et al. 2025 baseline)
-   -- used to demonstrate Gap 1: IF cannot detect zombie containers
-3. Energy waste metrics (Li et al. 2025 model)
-   -- used to demonstrate practical impact of detection
+Exposes the heuristic's per-container and per-rule scores as Prometheus
+gauges so any dashboard can visualise them. Energy / cost impact metrics
+use the Li et al. (2025) model from src/energy_impact.py.
 """
 
 import logging

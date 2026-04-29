@@ -1,16 +1,17 @@
 """
 Evaluation script to measure detection accuracy against ground-truth test scenarios.
 
-Includes:
-1. Heuristic detector accuracy (primary evaluation)
-2. Isolation Forest comparative baseline (Anemogiannis et al., 2025)
-3. Energy and cost impact analysis (Li et al., 2025)
+Single anchor paper: Li et al. (2025), "Energy-Aware Elastic Scaling Algorithm
+for Kubernetes Microservices," J. Network and Computer Applications.
+Li et al. acknowledge Kubernetes cannot distinguish active from idle containers
+and propose a scaling algorithm that *assumes* a list of zombies is given. This
+detector provides the missing classification layer.
 
-This comparative evaluation provides evidence of the two research gaps filled:
-- Gap filled vs. Anemogiannis et al.: IF cannot detect zombie containers (near-zero
-  CPU looks normal); heuristic achieves 100% recall vs. IF's ~20%.
-- Gap filled vs. Li et al.: EAES has no per-container classification; our detector
-  provides the missing detection layer that must precede any scaling action.
+The evaluation reports:
+1. Heuristic accuracy across the canonical 7-container set (designed positives)
+   and the adversarial 5-container set (designed failure-mode probes).
+2. Energy / cost impact via the Li et al. model (P = cpu*3.7W + mem*0.375W/GB
+   * PUE 1.2), implemented in src/energy_impact.py.
 """
 
 import argparse
@@ -216,9 +217,8 @@ def evaluate(prometheus_url: str, namespace: str = "test-scenarios",
 
 def run_full_comparative_evaluation(prometheus_url: str) -> dict:
     """
-    Run complete evaluation including:
-    1. Heuristic detector accuracy (primary contribution)
-    2. Energy and cost impact analysis (Li et al., 2025 model)
+    Run complete evaluation: heuristic detector accuracy + Li et al. (2025)
+    energy/cost impact for every container the heuristic flagged as zombie.
     """
     heuristic = evaluate(prometheus_url)
     logger.info("Calculating energy and cost impact...")

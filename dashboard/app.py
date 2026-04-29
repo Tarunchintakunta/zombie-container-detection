@@ -143,7 +143,7 @@ st.markdown("""
     Anurag Baiju &nbsp;·&nbsp; MSc Cloud Computing &nbsp;·&nbsp; National College of Ireland &nbsp;·&nbsp; 2025<br>
     Live data from <strong>AWS EKS cluster (us-east-1)</strong> &nbsp;|&nbsp;
     Prometheus scrape interval: 15 s &nbsp;|&nbsp;
-    Papers: Anemogiannis et al. (2025) &nbsp;·&nbsp; Li et al. (2025)
+    Anchor paper: Li et al. (2025)
   </p>
 </div>
 """, unsafe_allow_html=True)
@@ -408,23 +408,20 @@ is the hallmark of a stuck retry loop → detected with score 59.7/100.
         """)
 
     st.divider()
-    st.subheader("Connection to Anemogiannis et al. (2025) — Paper 1")
+    st.subheader("Honest Headline Numbers")
     st.markdown("""
-    Anemogiannis et al. use a **graph-based ML pipeline** (Isolation Forest + Decision Trees)
-    for Kubernetes anomaly detection, achieving F1 = 0.886 on **performance anomalies**
-    (CPU spikes, memory pressure). Their approach has five identified gaps:
+    On the canonical 7-container set (each container hand-crafted to match exactly one rule)
+    the heuristic reports **100% accuracy**, but that figure is an artefact of test-set design,
+    not a real-world claim. On the combined 12-container set — canonical 7 plus 5 adversarial
+    probes deliberately built to defeat the rules — the heuristic reports a more honest
+    **75% accuracy / 80% F1 / 50% FPR / 100% recall** (measured live on EKS).
+    Every real zombie was caught, but three legitimately idle workloads were also flagged.
+    See the *Failure Modes* tab for the breakdown and the operational lesson each one teaches.
 
-    | Gap | Their approach | Our heuristic |
-    |-----|---------------|---------------|
-    | **Gap 1** | Detects upward anomalies (high CPU). Zombies have LOW CPU — look **normal** | Rule 1 specifically targets sustained near-zero CPU with memory retention |
-    | **Gap 3** | ML decision is opaque — SRE cannot audit why a pod was flagged | Every detection shows per-rule score + exact metric values |
-    | **Gap 4** | Requires Neo4j database + Optuna HPO + retraining pipeline | Single Python process, 100m CPU, 256Mi memory, Prometheus only |
-    | **Gap 5** | Never compared against simple rule-based methods | This evaluation provides that missing comparison |
-
-    Our heuristic **fills all four gaps**. On the canonical 7-container set we report **100%**;
-    on the combined 12-container set (canonical + 5 adversarial probes) we report a more honest
-    **75% accuracy / 76.9% F1**. See the *Failure Modes* tab for the four misclassifications and
-    the operational lessons each one teaches.
+    Single anchor paper: **Li et al. (2025)** — *Energy-Aware Elastic Scaling for Kubernetes*
+    (J. Network and Computer Applications, IF ≈ 7.5). Li et al. acknowledge Kubernetes cannot
+    distinguish active from idle containers and provide a scaling algorithm that *assumes*
+    a list of zombies; this project provides the missing detection layer.
     """)
 
 # =============================================================================
@@ -633,16 +630,16 @@ AWS EKS Cluster — us-east-1  (zombie-detector-cluster)
                                 exports scores to Prometheus every 5 min
     """, language="text")
 
-    st.subheader("Research Outcome (Combined 12-Container Set)")
+    st.subheader("Research Outcome (Combined 12-Container Set, measured live)")
     o1, o2, o3 = st.columns(3)
     with o1:
         st.metric("Combined accuracy",        "75%")
-        st.metric("Combined F1 Score",        "76.9%")
-        st.metric("Canonical-only accuracy",  "100%", delta="hand-crafted set")
+        st.metric("Combined F1 Score",        "80%")
+        st.metric("Recall on real zombies",   "100%", delta="all 6 zombies caught")
     with o2:
-        st.metric("Naive threshold accuracy",  "58%")
-        st.metric("Isolation Forest F1",       "0%", delta="zero recall on zombies")
-        st.metric("Heuristic improvement",     "+77% F1 vs IF")
+        st.metric("False-positive rate",       "50%", delta="3 legitimate workloads flagged", delta_color="inverse")
+        st.metric("Naive threshold accuracy",  "58%", delta="-17 pp vs heuristic", delta_color="inverse")
+        st.metric("Canonical-only accuracy",   "100%", delta="hand-crafted set")
     with o3:
         st.metric("Annual cost waste found", f"${annual_cost:.0f}")
         st.metric("Computational overhead",  "100m CPU / 256Mi")
@@ -738,6 +735,6 @@ st.markdown(f"""
 ---
 **Data source:** Prometheus @ `{PROMETHEUS_URL}` &nbsp;|&nbsp;
 **Refresh:** every {REFRESH_SECONDS}s &nbsp;|&nbsp;
-**Papers:** Anemogiannis et al. (2025) · Li et al. (2025) ·
-Jindal et al. (2023) · Zhao et al. (2023) · Dang & Sharma (2024)
+**Anchor paper:** Li et al. (2025) &nbsp;|&nbsp;
+**Background literature:** Jindal et al. (2023) · Zhao et al. (2023) · Dang & Sharma (2024)
 """)
