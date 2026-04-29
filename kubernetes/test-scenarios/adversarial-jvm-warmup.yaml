@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adversarial-jvm-warmup
+  namespace: test-scenarios
+  labels:
+    app: adversarial-jvm-warmup
+    scenario: adversarial
+    expected: normal
+    failure-mode: "false-positive"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adversarial-jvm-warmup
+  template:
+    metadata:
+      labels:
+        app: adversarial-jvm-warmup
+        scenario: adversarial
+    spec:
+      containers:
+        - name: adversarial-jvm-warmup
+          image: python:3.11-slim
+          command: ["python3", "-c"]
+          args:
+            - |
+              # ADVERSARIAL: simulates JVM-style class-loading / cache warmup.
+              # Memory grows monotonically from 60MB to ~190MB (>200% growth)
+              # over 60 minutes while CPU stays near zero (just allocation,
+              # no processing). This pattern is identical to a memory leak,
+              # so Rule 2 fires -> FALSE POSITIVE.
+              import time
+              cache = []
+              for i in range(60):
+                  cache.append(bytearray(2 * 1024 * 1024))  # +2MB / minute
+                  time.sleep(60)
+              # After warmup, sit idle indefinitely (real app would now serve traffic)
+              while True:
+                  time.sleep(3600)
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi

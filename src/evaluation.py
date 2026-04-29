@@ -28,8 +28,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Ground truth: container name -> expected classification
+# Ground truth: container name -> expected classification.
+#
+# The first 7 entries are the "canonical" test set: 5 zombie archetypes plus
+# 2 normals. These are designed to exercise each rule in isolation.
+#
+# The 5 "adversarial-*" entries were added in response to professor feedback
+# that 100% accuracy on the canonical set is unrealistic. They deliberately
+# probe the heuristic's blind spots:
+#   - adversarial-cron-hourly:    cycle longer than the analysis window  (FP)
+#   - adversarial-cold-standby:   indistinguishable from a Rule-4 zombie (FP)
+#   - adversarial-jvm-warmup:     legitimate monotonic memory growth     (FP)
+#   - adversarial-stealth-zombie: zombie that evades Rule 1's spike check (FN)
+#   - adversarial-low-traffic-api: real but rare traffic resembles retries (FP)
 GROUND_TRUTH = {
+    # --- canonical test set ---
     "normal-web": "normal",
     "normal-batch": "normal",
     "zombie-low-cpu": "zombie",
@@ -37,6 +50,68 @@ GROUND_TRUTH = {
     "zombie-stuck-process": "zombie",
     "zombie-network-timeout": "zombie",
     "zombie-resource-imbalance": "zombie",
+    # --- adversarial test set (failure-mode probes) ---
+    "adversarial-cron-hourly": "normal",
+    "adversarial-cold-standby": "normal",
+    "adversarial-jvm-warmup": "normal",
+    "adversarial-stealth-zombie": "zombie",
+    "adversarial-low-traffic-api": "normal",
+}
+
+# Each adversarial container is annotated with the rule that misclassifies it
+# and the operational lesson the misclassification teaches.
+ADVERSARIAL_NOTES = {
+    "adversarial-cron-hourly": {
+        "expected_failure": "false_positive",
+        "trigger_rule": "rule1_low_cpu",
+        "lesson": (
+            "Rule 1 looks at a fixed 60-minute window. Workloads with a duty "
+            "cycle longer than the window appear flat-line and are misclassified. "
+            "Mitigation: increase --duration to cover the full cycle, or read "
+            "CronJob schedules from the Kubernetes API and exclude their pods."
+        ),
+    },
+    "adversarial-cold-standby": {
+        "expected_failure": "false_positive",
+        "trigger_rule": "rule4_network_timeout",
+        "lesson": (
+            "A cold-standby pod that holds memory and emits keepalive heartbeats "
+            "is behaviourally identical to a network-timeout zombie. The heuristic "
+            "cannot distinguish 'failover ready' from 'retrying a dead service'. "
+            "Mitigation: pod annotation (e.g. zombie.io/standby=true) to exempt."
+        ),
+    },
+    "adversarial-jvm-warmup": {
+        "expected_failure": "false_positive",
+        "trigger_rule": "rule2_memory_leak",
+        "lesson": (
+            "A JVM (or any cache-warming process) shows monotonic memory growth "
+            "with low CPU during warmup. Rule 2 fires because it cannot tell "
+            "'leak' from 'one-shot warmup that will eventually plateau'. "
+            "Mitigation: re-evaluate after pod uptime > 1 hour."
+        ),
+    },
+    "adversarial-stealth-zombie": {
+        "expected_failure": "false_negative",
+        "trigger_rule": "rule1_low_cpu",
+        "lesson": (
+            "Rule 1 excludes any container whose max CPU in the window exceeds "
+            "3 * low_cpu_percent (15%). A zombie that emits a brief synthetic "
+            "spike every 12 minutes evades the check. This is the heuristic's "
+            "worst case and the strongest argument for layering anomaly detection "
+            "(or analysing CPU-to-work-output ratios) on top of the rule engine."
+        ),
+    },
+    "adversarial-low-traffic-api": {
+        "expected_failure": "false_positive",
+        "trigger_rule": "rule4_network_timeout",
+        "lesson": (
+            "A real internal microservice that genuinely receives one request "
+            "every five minutes produces the same trace as zombie-network-timeout. "
+            "Mitigation: correlate with service-mesh request counts or success "
+            "rates; persistent low-volume traffic alone is not a zombie signal."
+        ),
+    },
 }
 
 
@@ -93,14 +168,22 @@ def evaluate(prometheus_url: str, namespace: str = "test-scenarios",
             fn += 1
             match = False
 
-        per_container.append({
+        row = {
             "container": name,
             "expected": expected,
             "predicted": predicted,
             "score": container["score"],
             "correct": match,
             "rules": container.get("rules", {}),
-        })
+        }
+        if name in ADVERSARIAL_NOTES:
+            row["adversarial"] = True
+            row["expected_failure"] = ADVERSARIAL_NOTES[name]["expected_failure"]
+            row["trigger_rule"] = ADVERSARIAL_NOTES[name]["trigger_rule"]
+            row["lesson"] = ADVERSARIAL_NOTES[name]["lesson"]
+        else:
+            row["adversarial"] = False
+        per_container.append(row)
 
     # Calculate metrics
     total = tp + tn + fp + fn

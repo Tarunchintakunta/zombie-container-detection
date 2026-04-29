@@ -22,7 +22,7 @@ spec:
       serviceAccountName: zombie-detector
       containers:
         - name: zombie-detector
-          image: 810244486416.dkr.ecr.us-east-1.amazonaws.com/zombie-detector:latest
+          image: 670694287735.dkr.ecr.us-east-1.amazonaws.com/zombie-detector:latest
           imagePullPolicy: Always
           args:
             - "--prometheus-url=http://prometheus-server.monitoring.svc.cluster.local:9090"

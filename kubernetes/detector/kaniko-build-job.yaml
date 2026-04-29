@@ -1,0 +1,71 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: build
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kaniko-builder
+  namespace: build
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kaniko-builder
+  namespace: build
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kaniko-builder
+  namespace: build
+subjects:
+  - kind: ServiceAccount
+    name: kaniko-builder
+    namespace: build
+roleRef:
+  kind: Role
+  name: kaniko-builder
+  apiGroup: rbac.authorization.k8s.io
+---
+# One-shot job that builds the detector image inside the cluster using kaniko
+# and pushes to ECR. No local Docker required.
+#
+# Before applying:
+#   - replace ${ECR_REGISTRY} with the account's ECR registry hostname
+#   - replace ${GIT_REPO} with the source repo URL (must be reachable from the cluster)
+#   - ensure the cluster's nodes have IAM permission to push to ECR (eksctl
+#     create cluster grants AmazonEC2ContainerRegistryPowerUser by default)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: build-zombie-detector
+  namespace: build
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: kaniko-builder
+      restartPolicy: Never
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - "--context=git://github.com/Tarunchintakunta/zombie-container-detection.git#refs/heads/main"
+            - "--dockerfile=Dockerfile"
+            - "--destination=${ECR_REGISTRY}/zombie-detector:latest"
+            - "--cache=true"
+            - "--verbosity=info"
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi

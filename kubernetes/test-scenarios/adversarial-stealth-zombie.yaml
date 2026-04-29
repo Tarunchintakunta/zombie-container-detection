@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adversarial-stealth-zombie
+  namespace: test-scenarios
+  labels:
+    app: adversarial-stealth-zombie
+    scenario: adversarial
+    expected: zombie
+    failure-mode: "false-negative"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adversarial-stealth-zombie
+  template:
+    metadata:
+      labels:
+        app: adversarial-stealth-zombie
+        scenario: adversarial
+    spec:
+      containers:
+        - name: adversarial-stealth-zombie
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # ADVERSARIAL: a real zombie that has learned to evade Rule 1.
+              # It does no useful work, but performs a 5-second CPU burst
+              # every 12 minutes purely to keep max_cpu_in_window > 15% so
+              # Rule 1 thinks "active workload" -> excluded.
+              # This is the worst case for the heuristic: a zombie that
+              # mimics a low-duty-cycle batch job. Expected: FALSE NEGATIVE.
+              while true; do
+                # 5s of useless CPU burn (just a counter, no real work)
+                end=$(($(date +%s) + 5))
+                while [ $(date +%s) -lt $end ]; do :; done
+                sleep 720
+              done
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
