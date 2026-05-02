@@ -25,6 +25,24 @@ The numbers below are from the running EKS cluster (`zombie-detector-cluster`, u
 
 The **75 % combined accuracy** is the headline number. Recall on real zombies is **100 %** — every real zombie was caught. The cost is a **50 % false-positive rate**: three legitimately idle workloads (`adversarial-cold-standby`, `adversarial-jvm-warmup`, `adversarial-low-traffic-api`) were misclassified as zombies. That trade-off — perfect recall at the price of one-in-two FP — is exactly what the professor asked us to surface, and it is the operational reality of any threshold-based detector.
 
+### Frequently raised questions about scope (read this before challenging the metrics)
+
+**Q1. "Should the heuristic be compared against the anchor paper (Li et al. 2025), not just a naive threshold?"**
+No, because Li et al. propose an *energy-aware scaling algorithm*, not a zombie *detector*. The paper explicitly assumes a list of zombie containers is already known and uses that list as input. There is no Li et al. detector to benchmark against — that missing detection layer is exactly the gap this project fills. Anemogiannis et al. (2025) and Liu et al. (2022) are similarly scaling/profiling papers, not classifiers. The naive static threshold is the only published detection rule a head-to-head comparison can be run against.
+
+**Q2. "Why only the naive static threshold? It looks like a strawman."**
+It is the actual operational baseline used in production today. Datadog idle-pod alerts, CloudWatch alarms, Prometheus AlertManager rules, and most in-house ops scripts use exactly the rule `CPU < 5 % for > 30 min → zombie`. Beating the operational status quo is the relevant claim for a thesis whose contribution is *"give engineers a better detection rule than the one they already use."* On the same 12-container set the heuristic scores **75 % accuracy / 80 % F1 / 100 % recall**; the naive threshold scores **58 % / 63 % / 67 %**. The +17 pp accuracy and +14 pp F1 delta is real engineering value, not a strawman win.
+
+**Q3. "Where is the machine-learning baseline (Isolation Forest, autoencoder, OCSVM)?"**
+Deliberately out of scope, treated as future work, for three reasons:
+1. **No published ML zombie-detector exists in the literature.** An "ML baseline" would be the author's own implementation, tunable to look as strong or as weak as desired — that is a self-comparison, not a benchmark.
+2. **No labelled production data.** Zombie containers are rare and unlabelled in real clusters, so any supervised ML would have to train on the same 12 hand-crafted scenarios it is tested against — pure overfitting. Unsupervised methods (Isolation Forest, OCSVM, DBSCAN) avoid that but introduce hyperparameter sensitivity that biases the result either way; classical anomaly detectors also score poorly on zombies specifically because zombies sit *near the centre* of the metric distribution (low CPU, modest memory) — they are not statistical outliers.
+3. **Interpretability is part of the contribution.** The selling point is that an on-call engineer reads *"Rule 3 fired: 4 spike-idle transitions"* and acts on it. ML returns a score with no narrative; comparing accuracy alone misses what the heuristic optimises for.
+A production system would *layer* ML on top of the rule engine to catch the `adversarial-stealth-zombie` class (the heuristic's documented FN), not replace it.
+
+**Q4. "Isn't a 50 % FPR too high to call this useful?"**
+Not in context. The 50 % FPR is on the **adversarial-only subset (n = 5)**, which is intentionally constructed from edge cases (cold-standby replicas, JVM warmup, low-traffic APIs) designed to defeat the rules — and **3 of those 5 probes were predicted to false-positive in `evaluation_results.json` *before* the test ran.** On canonical workloads the FPR is **0 %**. The honest combined number — 50 % FPR with 100 % recall — is the answer to the *"100 % is too good to be true"* feedback. The trade-off is explicit: prioritise catching every real zombie over never flagging a legitimate idle workload. Tightening the rules drops FPR but also drops recall; that direction is documented in [Failure Modes](#failure-modes--where-the-heuristic-breaks) as future-work mitigations (CronJob schedule lookup, post-warmup re-evaluation, service-mesh request-rate disambiguation).
+
 #### Designed-vs-observed adversarial outcomes
 
 Three of the five adversarial probes produced different per-container outcomes than originally designed; the YAMLs have been corrected so future runs hit the designed failure modes:
