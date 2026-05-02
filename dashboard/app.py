@@ -188,13 +188,10 @@ st.markdown("""
 .header-box p  { color:#a0aec0; margin:0.4rem 0 0 0; font-size:0.95rem; }
 </style>
 <div class="header-box">
-  <h1>Zombie Container Detection &nbsp;|&nbsp; Research Dashboard</h1>
+  <h1>Zombie Container Detection</h1>
   <p>
-    Heuristic-Based Approach to Detect Zombie Containers in Kubernetes for Resource Optimisation<br>
-    Anurag Baiju &nbsp;·&nbsp; MSc Cloud Computing &nbsp;·&nbsp; National College of Ireland &nbsp;·&nbsp; 2025<br>
-    Live data from <strong>AWS EKS cluster (us-east-1)</strong> &nbsp;|&nbsp;
-    Prometheus scrape interval: 15 s &nbsp;|&nbsp;
-    Anchor paper: Li et al. (2025)
+    Anurag Baiju (23409223) &nbsp;·&nbsp; MSc Cloud Computing &nbsp;·&nbsp; NCI 2025<br>
+    AWS EKS &nbsp;us-east-1 &nbsp;|&nbsp; Prometheus scrape 15&nbsp;s
   </p>
 </div>
 """, unsafe_allow_html=True)
@@ -220,15 +217,9 @@ else:
     else:
         short = raw_err.split(":", 1)[0]
     st.warning(
-        f"**OFFLINE MODE** · Prometheus at `{PROMETHEUS_URL}` is unreachable "
-        f"({short}). The dashboard is showing the last captured EKS snapshot "
-        f"from `evaluation_results.json` — this is the expected fallback, not "
-        f"an error.\n\n"
-        f"**To go LIVE:** run `./run_dashboard.ps1` (one-shot launcher) or "
-        f"manually `kubectl port-forward -n monitoring svc/prometheus-server 9090:9090`."
+        f"OFFLINE — Prometheus at `{PROMETHEUS_URL}` unreachable ({short}). "
+        f"Showing last EKS snapshot."
     )
-    with st.expander("Show full error message"):
-        st.code(raw_err, language="text")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Live Detection",
@@ -342,17 +333,8 @@ with tab1:
 # TAB 2 — THRESHOLD vs HEURISTIC COMPARISON
 # =============================================================================
 with tab2:
-    st.subheader("Naive Threshold vs. Heuristic Detection — Where the Research Adds Value")
-    st.markdown("""
-    The research question asks: **can heuristic analysis of CPU and memory patterns effectively
-    identify zombie containers?**
-
-    To answer it, we compare our heuristic against the simplest possible alternative —
-    a **naive static threshold**: *"Flag any container whose CPU stays below 5% for more than 30 minutes."*
-    This is the baseline approach used before this research.
-    """)
-
-    st.divider()
+    st.subheader("Heuristic vs. Naive Threshold")
+    st.caption("Baseline: `CPU < 5% for > 30 min → zombie`. Same 7 canonical containers.")
 
     # Build comparison table
     heuristic_fallback = {
@@ -461,137 +443,26 @@ with tab2:
 
     st.divider()
 
-    col_fp, col_fn = st.columns(2)
-    with col_fp:
-        st.markdown("""
-**False Positive — Naive threshold flags `normal-batch` as zombie**
-
-The naive rule: *CPU < 5% for > 30 min = zombie*
-
-`normal-batch` sleeps for **9 minutes** between 60-second CPU bursts.
-During that sleep window, it satisfies the threshold condition → flagged as zombie.
-
-**Consequence:** Engineers receive a false alert; if automated, the pod
-is terminated → the next scheduled batch run is lost.
-
-**Our Rule 1 fix:** Check the **entire 60-minute history**.
-If max CPU in the window > 15% at ANY point → container is NOT a zombie
-(it had recent productive work). `normal-batch` has max_cpu = 85% → excluded.
-        """)
-
-    with col_fn:
-        st.markdown("""
-**False Negative — Naive threshold misses `zombie-stuck-process`**
-
-`zombie-stuck-process` runs a 30-second CPU spike every 15 minutes
-(simulating a process stuck in a retry loop against a dead dependency).
-
-The naive rule sees the occasional spike (CPU > 5%) →
-*"this container is doing work"* → NOT flagged → MISSED.
-
-**In production:** This zombie has been consuming resources for weeks.
-The retry loop burns CPU every 15 minutes but accomplishes nothing.
-
-**Our Rule 3 fix:** Detect the **spike-then-idle** pattern specifically.
-Brief spikes followed by extended idle periods, repeated 3+ times,
-is the hallmark of a stuck retry loop → detected with score 59.7/100.
-        """)
-
     st.divider()
-    st.subheader("Honest Headline Numbers")
-    st.markdown("""
-    **Lead with recall, not accuracy.** On the combined 12-container set the heuristic
-    catches **100% of real zombies (recall = 6/6)** with **0% FPR on canonical workloads**
-    and **50% FPR on adversarial probes by design** (3 of 5 probes were *predicted* to
-    false-positive in `evaluation_results.json` *before* the test ran — see the
-    *Failure Modes* tab). Combined: **75% accuracy / 80% F1 / 100% recall / 50% FPR**.
-    The 100% accuracy number on the canonical 7-container set is an artefact of test-set
-    design, not a real-world claim; the 50% FPR is the cost of guaranteeing no zombie
-    is missed — the recall/precision trade-off is the central engineering finding.
-    """)
-
-    st.divider()
-    st.subheader("Comparison Scope and Limitations — Why These Baselines, Not Others")
-    with st.expander("Q: Why not compare against the anchor paper (Li et al. 2025)?"):
-        st.markdown("""
-        Li et al. (2025) propose an **energy-aware elastic scaling algorithm**, not a
-        zombie *detector*. The paper explicitly assumes a list of zombies is already
-        identified and uses that list as input to its scaling decisions. There is no
-        Li et al. detector to benchmark against — that missing detection layer is the
-        gap this project fills.
-
-        Same applies to the other papers in `docs/`: Anemogiannis et al. (2025) propose
-        an eviction policy; Liu et al. (2022) profile resource usage. None of them
-        publish a head-to-head zombie classifier.
-        """)
-    with st.expander("Q: Why compare only against a naive static threshold?"):
-        st.markdown("""
-        Because the naive threshold (*"CPU < 5% for > 30 min → zombie"*) is the
-        **actual operational baseline** running in production today: Datadog,
-        CloudWatch, Prometheus AlertManager, and most in-house ops scripts use
-        exactly this rule. Beating the operational status quo is the relevant claim
-        for an MSc thesis whose contribution is *"give engineers a better detection
-        rule than the one they already use."* On the same 12-container set the naive
-        threshold scores **58% accuracy** vs the heuristic's **75% accuracy** — a
-        17-point delta on real zombie patterns.
-        """)
-    with st.expander("Q: Why no machine-learning baseline (Isolation Forest, autoencoder, etc.)?"):
-        st.markdown("""
-        Three concrete reasons:
-
-        **1. No published ML zombie-detector exists.** An "ML baseline" would be the
-        author's own implementation, tunable to look as strong or as weak as desired.
-        That is a self-comparison, not a benchmark.
-
-        **2. No labelled production data.** Zombie containers in real clusters are
-        rare and unlabelled. Any supervised ML would train on the same 12 hand-crafted
-        scenarios it is tested against — pure overfitting. Unsupervised methods
-        (Isolation Forest, OCSVM) avoid that but introduce hyperparameter
-        sensitivity that biases the result either way.
-
-        **3. Interpretability is part of the contribution.** The selling point is that
-        an on-call engineer reads *"Rule 3 fired: 4 spike-idle transitions"* and can
-        act on it. ML returns a score with no narrative; comparing accuracy alone
-        misses what the heuristic is optimising for.
-
-        **Treated as future work, not a missing baseline.** A production system would
-        layer ML on top of the rule engine to catch the *adversarial-stealth-zombie*
-        class (the heuristic's documented FN), not replace it.
-        """)
-    with st.expander("Q: Is 50% FPR too high?"):
-        st.markdown("""
-        Not in context. The **50% FPR is on the adversarial-only subset (n=5)**, which
-        is *intentionally* constructed to defeat the rules. **3 of those 5 probes were
-        predicted to false-positive before the test ran** (see `evaluation_results.json`
-        → `per_container[*].expected_failure`). On canonical workloads the FPR is **0%**.
-
-        The honest combined number — 50% FPR with 100% recall — is the answer to the
-        professor's *"100% is too good to be true"* feedback. The trade-off is
-        explicit: the heuristic prioritises **catching every real zombie** over
-        **never flagging a legitimate idle workload**. Tightening the rules would
-        drop FPR but also drop recall; that direction is documented in the
-        *Failure Modes* tab as future-work mitigations (CronJob schedule lookup,
-        post-warmup re-evaluation, service-mesh request-rate disambiguation).
-        """)
+    fp_fn = pd.DataFrame([
+        {"Type": "FP", "Container": "normal-batch",
+         "Naive": "ZOMBIE (9-min idle window between 60-s bursts crosses threshold)",
+         "Heuristic": "NORMAL (Rule 1 sees max_cpu = 85% in window → exclude)"},
+        {"Type": "FN", "Container": "zombie-stuck-process",
+         "Naive": "NORMAL (30-s spike every 15 min looks like activity)",
+         "Heuristic": "ZOMBIE (Rule 3 detects spike-then-idle pattern, score 59.7)"},
+    ])
+    st.dataframe(fp_fn, use_container_width=True, hide_index=True)
 
 # =============================================================================
 # TAB 3 — ENERGY & COST IMPACT
 # =============================================================================
 with tab3:
-    st.subheader("Energy and Cost Impact Analysis")
-    st.markdown("""
-    **Reference:** Li et al. (2025) — *"Energy-Aware Elastic Scaling Algorithm for Kubernetes
-    Microservices"*, Journal of Network and Computer Applications (Elsevier, IF ≈ 7.5).
-
-    **Li et al. key finding:** The default Kubernetes HPA "fails to distinguish active from
-    idle containers," leading to resource waste. Their EAES algorithm achieves **15.34% energy
-    reduction** by managing idle containers.
-
-    **Our contribution:** Li et al.'s algorithm is a *scaling* mechanism — it cannot classify
-    individual containers as zombie vs. legitimately idle. We provide the **missing detection layer**
-    that must run before any scaling or termination action.
-    """)
-
+    st.subheader("Energy & Cost")
+    st.caption(
+        "Energy model: Li et al. (2025) — `P = (cpu·3.7W + mem·0.375W/GB)·PUE(1.2)`. "
+        "PUE 1.2, carbon intensity 0.233 kg CO2/kWh (us-east-1)."
+    )
     df_e = pd.DataFrame(ENERGY_DATA)
     total_power  = df_e["power_w"].sum()
     total_cost   = df_e["cost_mo"].sum()
@@ -640,60 +511,19 @@ with tab3:
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with col_proj:
-        st.subheader("100-Pod Cluster Projection")
-        st.markdown("""
-        **Basis:** Jindal et al. (2023) — 30% of containers in 1,000 Kubernetes clusters
-        showed zombie-like patterns.
-        """)
+        st.subheader("Projected to 100-pod cluster")
+        st.caption("Scale factor: Jindal et al. (2023) — 30% zombie rate observed across 1,000 clusters.")
         scale = 30.0 / 5.0
-        st.metric("Expected zombie containers",    "30")
-        st.metric("Projected monthly cost waste",  f"${round(total_cost*scale,2)}")
-        st.metric("Projected annual cost waste",   f"${round(total_cost*scale*12,2)}")
-        st.metric("Monthly CO2 waste",             f"{round(total_co2*scale,2)} kg CO2")
-
-    st.divider()
-    st.subheader("Gap Addressed — Li et al. (2025) Gap 1")
-    st.markdown("""
-    **Problem (Li et al. acknowledge):** Kubernetes cannot distinguish between:
-    - A **batch processor** asleep for 9 minutes between scheduled runs ← do not terminate
-    - An **orphaned sidecar** sleeping forever after its parent was deleted ← terminate
-
-    Both show near-zero CPU. Li et al.'s EAES would scale down BOTH — risking disruption.
-
-    **Our solution:** Five heuristic rules that examine temporal patterns to tell them apart:
-    - Batch processor: recent large CPU spikes in history → Rule 1 NOT triggered → preserved
-    - Orphaned sidecar: flat-line CPU for 47 minutes + no network → Rule 1 TRIGGERED → flagged
-
-    **Pipeline with Li et al. (future work):**
-    ```
-    [Our Heuristic] → Classify containers (zombie / idle / active)
-         ↓
-    [Li et al. EAES] → Scale to zero confirmed zombies only
-         ↓
-    Result: 15.34% energy reduction (Li et al.) WITHOUT disrupting legitimate idle workloads
-    ```
-    """)
-
-    st.markdown(f"""
-    **Energy model:** Li et al. (2025) — `P_waste = (cpu_req * 3.7W + mem_req * 0.375W/GB) * PUE(1.2)`
-    PUE = 1.2 (AWS data centres) | Carbon intensity = 0.233 kg CO2/kWh (US-East-1)
-    """)
+        st.metric("Expected zombies",  "30")
+        st.metric("Cost / month",      f"${round(total_cost*scale,2)}")
+        st.metric("Cost / year",       f"${round(total_cost*scale*12,2)}")
+        st.metric("CO2 / month",       f"{round(total_co2*scale,2)} kg")
 
 # =============================================================================
 # TAB 4 — EXPERIMENTAL DESIGN
 # =============================================================================
 with tab4:
-    st.subheader("Why 7 Containers? — Experimental Design Rationale")
-
-    st.markdown("""
-    The 7 test containers are the **minimal sufficient set** to:
-    1. Exercise every one of the 5 heuristic rules against its target archetype
-    2. Provide 2 true-negative cases that guard against false positives
-    3. Cover the 5 zombie archetypes identified in the literature (Zhao et al. 2023, Dang & Sharma 2024)
-
-    Every container has a real-world equivalent. This is not a synthetic benchmark —
-    it reflects the zombie patterns found in Jindal et al.'s (2023) survey of 1,000 clusters.
-    """)
+    st.subheader("Test Set — 7 Canonical Containers")
 
     design = [
         {"#": 1, "Container": "zombie-low-cpu",
@@ -736,30 +566,7 @@ with tab4:
     st.dataframe(pd.DataFrame(design), use_container_width=True, hide_index=True)
 
     st.divider()
-    st.markdown("""
-    **Why `normal-batch` is the most important test case:**
-
-    A naive threshold ("CPU < 5% for > 30 minutes = zombie") would **correctly** detect
-    zombies 1–5 but would also **incorrectly flag** `normal-batch` during its 9-minute
-    idle window between bursts.
-
-    Our **Rule 1** avoids this by examining the entire 60-minute CPU history:
-
-    ```
-    normal-batch:    max_cpu_in_window = 85%  →  spike detected  →  Rule 1 NOT triggered  →  NORMAL  ✓
-    zombie-low-cpu:  max_cpu_in_window = 0.2% →  flat line       →  Rule 1 triggered      →  ZOMBIE  ✓
-    ```
-
-    This distinction is the core contribution of the research over a simple threshold rule.
-
-    **Scale relevance:**
-    Jindal et al. (2023) found 30% zombie-like containers across 1,000 Kubernetes clusters.
-    In a 100-pod cluster that is 30 zombie containers — all 5 archetypes above contribute to
-    that 30%, which is why validating all 5 is necessary.
-    """)
-
-    st.divider()
-    st.subheader("System Architecture on AWS EKS")
+    st.subheader("Cluster layout")
     st.code("""
 AWS EKS Cluster — us-east-1  (zombie-detector-cluster)
 ├── test-scenarios  (7 test containers, running 13+ days)
@@ -780,33 +587,30 @@ AWS EKS Cluster — us-east-1  (zombie-detector-cluster)
                                 exports scores to Prometheus every 5 min
     """, language="text")
 
-    st.subheader("Research Outcome (Combined 12-Container Set, measured live)")
+    st.subheader("Headline Numbers (combined 12-container set, measured live)")
     o1, o2, o3 = st.columns(3)
     with o1:
-        st.metric("Combined accuracy",        "75%")
-        st.metric("Combined F1 Score",        "80%")
-        st.metric("Recall on real zombies",   "100%", delta="all 6 zombies caught")
+        st.metric("Accuracy",  "75%")
+        st.metric("F1 Score",  "80%")
+        st.metric("Recall",    "100%")
     with o2:
-        st.metric("False-positive rate",       "50%", delta="3 legitimate workloads flagged", delta_color="inverse")
-        st.metric("Naive threshold accuracy",  "58%", delta="-17 pp vs heuristic", delta_color="inverse")
-        st.metric("Canonical-only accuracy",   "100%", delta="hand-crafted set")
+        st.metric("FPR",                   "50%", delta_color="off")
+        st.metric("Naive baseline accuracy", "58%", delta="-17 pp", delta_color="inverse")
+        st.metric("Canonical-only accuracy", "100%")
     with o3:
-        st.metric("Annual cost waste found", f"${annual_cost:.0f}")
-        st.metric("Computational overhead",  "100m CPU / 256Mi")
-        st.metric("External dependencies",   "Prometheus only")
+        st.metric("Annual waste detected", f"${annual_cost:.0f}")
+        st.metric("Detector overhead",     "100m CPU / 256Mi")
+        st.metric("Dependencies",          "Prometheus only")
 
 # =============================================================================
 # TAB 5 — FAILURE MODES (ADVERSARIAL SET)
 # =============================================================================
 with tab5:
-    st.subheader("Failure Modes — Where the Heuristic Breaks (Honest Reporting)")
-    st.markdown("""
-    The professor's feedback was that **100% accuracy on a 7-container hand-crafted
-    set is too good to be true** and that the research must show its weak side. This
-    tab documents the five adversarial scenarios that probe the detector's blind
-    spots. Four out of five misclassify by design — that is the *expected* result.
-    Combined accuracy across canonical + adversarial sets: **75%**.
-    """)
+    st.subheader("Adversarial Test Set")
+    st.caption(
+        "5 probes designed to defeat the rules. 4/5 misclassify by design. "
+        "Combined 12-container accuracy: 75%."
+    )
 
     failure_data = [
         {"Container": "adversarial-cron-hourly",
@@ -855,36 +659,12 @@ with tab5:
     st.dataframe(df_adv, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.subheader("Confusion Matrix — Combined Set (12 containers)")
+    st.subheader("Confusion Matrix — 12-container combined set")
     cm1, cm2, cm3, cm4 = st.columns(4)
-    cm1.metric("True Positives",  "5", delta="zombies caught")
-    cm2.metric("True Negatives",  "3", delta="normals correctly passed")
-    cm3.metric("False Positives", "3", delta="-3 (rule 1, 2, 4 collisions)", delta_color="inverse")
-    cm4.metric("False Negatives", "1", delta="-1 (stealth zombie)",          delta_color="inverse")
-
-    st.divider()
-    st.markdown("""
-**What these failures imply for production deployment:**
-
-1. **The 60-minute window is a hard floor.** Any cron / batch / scheduled workload
-   with a duty cycle longer than the window will be misclassified.
-2. **Behavioural metrics alone cannot tell zombie from cold-standby.** The two are
-   observationally identical; a pod annotation system or service-mesh signal is needed.
-3. **One-shot growth is not a leak.** A warmup-aware version of Rule 2 (re-evaluate
-   after the first hour) would cut the JVM-warmup false positive.
-4. **Stealth zombies defeat the spike check.** The heuristic is not adversarially
-   robust. For determined adversaries, layer anomaly detection on top.
-5. **75% is the right number to report.** 100% was an artefact of a hand-crafted
-   test set where every container matched exactly one rule by design.
-""")
+    cm1.metric("TP", "5")
+    cm2.metric("TN", "3")
+    cm3.metric("FP", "3", delta_color="off")
+    cm4.metric("FN", "1", delta_color="off")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-df_e = pd.DataFrame(ENERGY_DATA)
-annual_cost = df_e["cost_mo"].sum() * 12
-st.markdown(f"""
----
-**Data source:** Prometheus @ `{PROMETHEUS_URL}` &nbsp;|&nbsp;
-**Refresh:** every {REFRESH_SECONDS}s &nbsp;|&nbsp;
-**Anchor paper:** Li et al. (2025) &nbsp;|&nbsp;
-**Background literature:** Jindal et al. (2023) · Zhao et al. (2023) · Dang & Sharma (2024)
-""")
+st.markdown(f"---\n*Prometheus `{PROMETHEUS_URL}` · refresh {REFRESH_SECONDS}s*")
