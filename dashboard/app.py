@@ -13,18 +13,23 @@ The dashboard shows:
 """
 
 import os
+import json
 import requests
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import plotly.express as px
+from pathlib import Path
+from datetime import datetime, timezone
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 PROMETHEUS_URL = os.environ.get(
     "PROMETHEUS_URL",
-    "http://prometheus-server.monitoring.svc.cluster.local:9090",
+    "http://localhost:9090",
 )
 REFRESH_SECONDS = int(os.environ.get("REFRESH_SECONDS", "30"))
+SNAPSHOT_PATH = Path(__file__).resolve().parent.parent / "evaluation_results.json"
 
 st.set_page_config(
     page_title="Zombie Container Detection",
@@ -32,6 +37,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# Auto-refresh: a hidden iframe whose JS reloads the parent every N seconds.
+# Avoids the streamlit-autorefresh dependency.
+components.html(
+    f"<script>setTimeout(()=>{{window.parent.location.reload();}},{REFRESH_SECONDS*1000});</script>",
+    height=0, width=0,
+)
+
+# ── Live / offline state ──────────────────────────────────────────────────────
+if "prom_error" not in st.session_state:
+    st.session_state.prom_error = None
+if "last_fetched" not in st.session_state:
+    st.session_state.last_fetched = None
 
 CLR_ZOMBIE    = "#e74c3c"
 CLR_POTENTIAL = "#f39c12"
@@ -44,40 +62,73 @@ def prom_query(q: str) -> list:
     try:
         r = requests.get(
             f"{PROMETHEUS_URL}/api/v1/query",
-            params={"query": q}, timeout=6,
+            params={"query": q}, timeout=4,
         )
+        r.raise_for_status()
+        st.session_state.prom_error = None
         return r.json().get("data", {}).get("result", [])
-    except Exception:
+    except Exception as e:
+        st.session_state.prom_error = f"{type(e).__name__}: {e}"
         return []
+
+
+def _classify(score: float) -> str:
+    return ("zombie" if score >= 60
+            else "potential_zombie" if score >= 30
+            else "normal")
+
+
+def _load_offline_snapshot() -> tuple[list, str]:
+    """Fallback when Prometheus is unreachable: serve evaluation_results.json."""
+    try:
+        data = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        st.session_state.prom_error = (
+            f"{st.session_state.prom_error or 'Prometheus unreachable'} "
+            f"and snapshot load failed: {e}"
+        )
+        return [], "snapshot unavailable"
+
+    rows = []
+    for c in data.get("per_container", []):
+        score = float(c.get("score", 0.0))
+        rows.append({
+            "container": c["container"],
+            "score": score,
+            "classification": _classify(score),
+            "rules": {},  # snapshot does not store per-rule sub-scores
+        })
+    captured = data.get("_meta", {}).get("captured_from", "EKS snapshot")
+    return sorted(rows, key=lambda x: x["score"], reverse=True), captured
 
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
 @st.cache_data(ttl=REFRESH_SECONDS)
-def get_heuristic_results():
+def get_heuristic_results() -> tuple[list, str]:
+    """Return (rows, source). source is 'live' or a snapshot description."""
+    raw = prom_query('zombie_container_score{namespace="test-scenarios"}')
+    if not raw:
+        rows, src = _load_offline_snapshot()
+        return rows, src
+
     rows = []
-    for r in prom_query('zombie_container_score{namespace="test-scenarios"}'):
+    for r in raw:
         container = r["metric"].get("container", "")
         score = float(r["value"][1])
-        classification = (
-            "zombie" if score >= 60
-            else "potential_zombie" if score >= 30
-            else "normal"
-        )
         rows.append({"container": container, "score": score,
-                     "classification": classification})
+                     "classification": _classify(score)})
 
     rule_data = {}
     for r in prom_query('zombie_container_rule_score{namespace="test-scenarios"}'):
         c = r["metric"].get("container", "")
         rule = r["metric"].get("rule", "")
-        if c not in rule_data:
-            rule_data[c] = {}
-        rule_data[c][rule] = float(r["value"][1])
+        rule_data.setdefault(c, {})[rule] = float(r["value"][1])
 
     for row in rows:
         row["rules"] = rule_data.get(row["container"], {})
 
-    return sorted(rows, key=lambda x: x["score"], reverse=True)
+    st.session_state.last_fetched = datetime.now(timezone.utc)
+    return sorted(rows, key=lambda x: x["score"], reverse=True), "live"
 
 
 GROUND_TRUTH = {
@@ -148,6 +199,25 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Live/Offline status banner ────────────────────────────────────────────────
+_results_preview, _source_preview = get_heuristic_results()
+_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+if _source_preview == "live":
+    st.success(
+        f"**LIVE** · Connected to Prometheus at `{PROMETHEUS_URL}` · "
+        f"refresh every {REFRESH_SECONDS}s · last fetched {_now}"
+    )
+else:
+    err = st.session_state.prom_error or "no data returned"
+    st.error(
+        f"**OFFLINE** · Cannot reach Prometheus at `{PROMETHEUS_URL}` "
+        f"({err}). Showing last captured snapshot from EKS "
+        f"(`evaluation_results.json`). To restore live mode run "
+        f"`./run_dashboard.ps1` (Windows) or start the port-forward manually:\n\n"
+        f"`kubectl port-forward -n monitoring svc/prometheus-server 9090:9090`"
+    )
+
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Live Detection",
     "Threshold vs Heuristic",
@@ -160,15 +230,22 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # TAB 1 — LIVE DETECTION
 # =============================================================================
 with tab1:
-    results = get_heuristic_results()
+    results, source = get_heuristic_results()
 
     if not results:
         st.warning(
-            "No data from Prometheus yet. "
-            "The detector may still be collecting the first 30 minutes of metrics."
+            "No data available from Prometheus and the offline snapshot is empty. "
+            "Check that the cluster is up and `evaluation_results.json` exists."
         )
         st.info(f"Prometheus URL: {PROMETHEUS_URL}")
         st.stop()
+
+    if source != "live":
+        st.caption(
+            f"Tab 1 is showing the offline snapshot ({source}). Per-rule heatmap "
+            f"values are not stored in the snapshot, so the heatmap is blank in "
+            f"OFFLINE mode."
+        )
 
     zombies   = [r for r in results if r["classification"] == "zombie"]
     potential = [r for r in results if r["classification"] == "potential_zombie"]
@@ -272,7 +349,8 @@ with tab2:
         "zombie-stuck-process": 59.7, "zombie-network-timeout": 79.6,
         "zombie-resource-imbalance": 75.0,
     }
-    live = {r["container"]: r["score"] for r in get_heuristic_results()}
+    _live_rows, _ = get_heuristic_results()
+    live = {r["container"]: r["score"] for r in _live_rows}
     heuristic_map = {k: live.get(k, heuristic_fallback.get(k, 0.0))
                      for k in GROUND_TRUTH}
 
