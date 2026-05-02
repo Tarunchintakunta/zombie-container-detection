@@ -8,8 +8,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from PIL import Image
 
-OUT = Path("images/28_dashboard_live_validation.png")
-URL = "http://localhost:8501"
+import os
+OUT = Path("images/30_dashboard_public_eks_validation.png")
+URL = os.environ.get("DASH_URL", "http://localhost:8501")
 
 opts = EdgeOptions()
 opts.add_argument("--headless=new")
