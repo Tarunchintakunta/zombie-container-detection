@@ -209,14 +209,26 @@ if _source_preview == "live":
         f"refresh every {REFRESH_SECONDS}s · last fetched {_now}"
     )
 else:
-    err = st.session_state.prom_error or "no data returned"
-    st.error(
-        f"**OFFLINE** · Cannot reach Prometheus at `{PROMETHEUS_URL}` "
-        f"({err}). Showing last captured snapshot from EKS "
-        f"(`evaluation_results.json`). To restore live mode run "
-        f"`./run_dashboard.ps1` (Windows) or start the port-forward manually:\n\n"
-        f"`kubectl port-forward -n monitoring svc/prometheus-server 9090:9090`"
+    raw_err = st.session_state.prom_error or "no data returned"
+    # Reduce the verbose Python ConnectionError chain to a one-word reason.
+    if "actively refused" in raw_err or "ConnectionError" in raw_err:
+        short = "connection refused (port-forward not running)"
+    elif "timeout" in raw_err.lower():
+        short = "connection timed out"
+    elif "Name or service not known" in raw_err or "getaddrinfo" in raw_err:
+        short = "host not resolvable"
+    else:
+        short = raw_err.split(":", 1)[0]
+    st.warning(
+        f"**OFFLINE MODE** · Prometheus at `{PROMETHEUS_URL}` is unreachable "
+        f"({short}). The dashboard is showing the last captured EKS snapshot "
+        f"from `evaluation_results.json` — this is the expected fallback, not "
+        f"an error.\n\n"
+        f"**To go LIVE:** run `./run_dashboard.ps1` (one-shot launcher) or "
+        f"manually `kubectl port-forward -n monitoring svc/prometheus-server 9090:9090`."
     )
+    with st.expander("Show full error message"):
+        st.code(raw_err, language="text")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Live Detection",
