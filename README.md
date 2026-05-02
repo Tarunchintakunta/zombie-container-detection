@@ -6,15 +6,22 @@ A lightweight, transparent, rule-based system for detecting zombie containers in
 
 ## Live demo dashboard (public)
 
-**URL:** http://adf421f534eea449a9e5d8d39e7ec499-327316410.us-east-1.elb.amazonaws.com
+**Primary URL (HTTPS, works from anywhere):**
+**https://school-same-sporting-api.trycloudflare.com**
+
+**Backup URL (HTTP only, AWS direct):**
+http://adf421f534eea449a9e5d8d39e7ec499-327316410.us-east-1.elb.amazonaws.com
 
 Hosted on the live AWS EKS cluster `zombie-detector-cluster` (us-east-1). The dashboard pod runs inside the cluster and reads Prometheus directly over Kubernetes service discovery, so every metric on screen is **real-time data scraped at 15-second intervals** — no fake or cached values. Auto-refreshes every 30 s. Stays online while the cluster is up.
 
 | | |
 |---|---|
-| Hosting | EKS pod + AWS Classic ELB (free tier covers 1 ELB / 750 hrs / 15 GB per month) |
-| Cost while live | ≈ $0 if free tier active, otherwise ≈ $18/month |
-| Tear down | `kubectl delete -f kubernetes/dashboard/deployment-configmap.yaml` |
+| Public ingress | Cloudflare quick-tunnel (free, HTTPS) — falls back to AWS Classic ELB on port 80 |
+| Hosting | EKS pod (`zombie-dashboard` in `zombie-detector` namespace) |
+| Cost while live | ≈ $0 (CF tunnel is free; 1 CLB is covered by AWS free tier 750 hrs / 15 GB / month) |
+| Tear down | `kubectl delete -f kubernetes/dashboard/cloudflared-tunnel.yaml -f kubernetes/dashboard/deployment-configmap.yaml` |
+
+> **If your friend says the URL "doesn't work":** use the **HTTPS** Cloudflare URL above. Some browsers auto-upgrade plain `http://` to `https://` and then refuse the connection because the AWS ELB does not serve port 443.
 
 ---
 
