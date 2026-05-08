@@ -17,7 +17,6 @@ import json
 import requests
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
@@ -38,12 +37,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Auto-refresh: a hidden iframe whose JS reloads the parent every N seconds.
-# Avoids the streamlit-autorefresh dependency.
-components.html(
-    f"<script>setTimeout(()=>{{window.parent.location.reload();}},{REFRESH_SECONDS*1000});</script>",
-    height=0, width=0,
-)
+# Auto-refresh strategy:
+#   - st.fragment(run_every=...) re-runs only the live sections on a timer,
+#     so charts update in place without a full page reload (no flicker, no
+#     loss of tab/scroll state, no re-import of plotly etc.).
+#   - The cache below de-dupes Prometheus queries across the banner + tabs
+#     within a single refresh window.
+FRAGMENT_INTERVAL = f"{REFRESH_SECONDS}s"
 
 # ── Live / offline state ──────────────────────────────────────────────────────
 if "prom_error" not in st.session_state:
@@ -103,7 +103,10 @@ def _load_offline_snapshot() -> tuple[list, str]:
 
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
-@st.cache_data(ttl=REFRESH_SECONDS)
+# Cache TTL is half the refresh interval: short enough that the next fragment
+# tick always sees fresh data, long enough to de-dupe queries across the banner
+# + tabs in a single render.
+@st.cache_data(ttl=max(2, REFRESH_SECONDS // 2))
 def get_heuristic_results() -> tuple[list, str]:
     """Return (rows, source). source is 'live' or a snapshot description."""
     raw = prom_query('zombie_container_score{namespace="test-scenarios"}')
@@ -196,30 +199,32 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── Live/Offline status banner ────────────────────────────────────────────────
-_results_preview, _source_preview = get_heuristic_results()
-_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-if _source_preview == "live":
-    st.success(
-        f"**LIVE** · Connected to Prometheus at `{PROMETHEUS_URL}` · "
-        f"refresh every {REFRESH_SECONDS}s · last fetched {_now}"
-    )
-else:
-    raw_err = st.session_state.prom_error or "no data returned"
-    # Reduce the verbose Python ConnectionError chain to a one-word reason.
-    if "actively refused" in raw_err or "ConnectionError" in raw_err:
-        short = "connection refused (port-forward not running)"
-    elif "timeout" in raw_err.lower():
-        short = "connection timed out"
-    elif "Name or service not known" in raw_err or "getaddrinfo" in raw_err:
-        short = "host not resolvable"
+# ── Live/Offline status banner (fragment, refreshes in place) ─────────────────
+@st.fragment(run_every=FRAGMENT_INTERVAL)
+def render_status_banner():
+    _, source = get_heuristic_results()
+    _now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    if source == "live":
+        st.success(
+            f"**LIVE** · Connected to Prometheus at `{PROMETHEUS_URL}` · "
+            f"refresh every {REFRESH_SECONDS}s · last fetched {_now}"
+        )
     else:
-        short = raw_err.split(":", 1)[0]
-    st.warning(
-        f"OFFLINE — Prometheus at `{PROMETHEUS_URL}` unreachable ({short}). "
-        f"Showing last EKS snapshot."
-    )
+        raw_err = st.session_state.prom_error or "no data returned"
+        if "actively refused" in raw_err or "ConnectionError" in raw_err:
+            short = "connection refused (port-forward not running)"
+        elif "timeout" in raw_err.lower():
+            short = "connection timed out"
+        elif "Name or service not known" in raw_err or "getaddrinfo" in raw_err:
+            short = "host not resolvable"
+        else:
+            short = raw_err.split(":", 1)[0]
+        st.warning(
+            f"OFFLINE — Prometheus at `{PROMETHEUS_URL}` unreachable ({short}). "
+            f"Showing last EKS snapshot."
+        )
+
+render_status_banner()
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Live Detection",
@@ -230,109 +235,112 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 # =============================================================================
-# TAB 1 — LIVE DETECTION
+# TAB 1 — LIVE DETECTION (live fragment: re-runs in place every REFRESH_SECONDS)
 # =============================================================================
 with tab1:
-    results, source = get_heuristic_results()
+    @st.fragment(run_every=FRAGMENT_INTERVAL)
+    def render_live_detection():
+        results, source = get_heuristic_results()
 
-    if not results:
-        st.warning(
-            "No data available from Prometheus and the offline snapshot is empty. "
-            "Check that the cluster is up and `evaluation_results.json` exists."
+        if not results:
+            st.warning(
+                "No data available from Prometheus and the offline snapshot is empty. "
+                "Check that the cluster is up and `evaluation_results.json` exists."
+            )
+            st.info(f"Prometheus URL: {PROMETHEUS_URL}")
+            return
+
+        if source != "live":
+            st.caption(
+                f"Tab 1 is showing the offline snapshot ({source}). Per-rule heatmap "
+                f"values are not stored in the snapshot, so the heatmap is blank in "
+                f"OFFLINE mode."
+            )
+
+        zombies   = [r for r in results if r["classification"] == "zombie"]
+        potential = [r for r in results if r["classification"] == "potential_zombie"]
+        normal    = [r for r in results if r["classification"] == "normal"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Containers Analysed", len(results))
+        c2.metric("Zombies Detected",    len(zombies))
+        c3.metric("Potential Zombies",   len(potential))
+        c4.metric("Normal",              len(normal))
+
+        st.divider()
+
+        names  = [r["container"] for r in results]
+        scores = [r["score"]     for r in results]
+        colors = [
+            CLR_ZOMBIE if r["classification"] == "zombie"
+            else CLR_POTENTIAL if r["classification"] == "potential_zombie"
+            else CLR_NORMAL
+            for r in results
+        ]
+
+        fig = go.Figure(go.Bar(
+            x=scores, y=names, orientation="h",
+            marker_color=colors,
+            text=[f"{s:.1f}" for s in scores], textposition="outside",
+        ))
+        fig.add_vline(x=60, line_dash="dash", line_color=CLR_ZOMBIE,
+                      annotation_text="Zombie  >=60")
+        fig.add_vline(x=30, line_dash="dash", line_color=CLR_POTENTIAL,
+                      annotation_text="Potential  >=30")
+        fig.update_layout(
+            title="Heuristic Composite Score per Container (0–100)",
+            xaxis_title="Zombie Score", yaxis_title="",
+            xaxis_range=[0, 115], height=400,
+            plot_bgcolor="#0d1117", paper_bgcolor="#0d1117", font_color="#e0e0e0",
         )
-        st.info(f"Prometheus URL: {PROMETHEUS_URL}")
-        st.stop()
+        st.plotly_chart(fig, use_container_width=True)
 
-    if source != "live":
-        st.caption(
-            f"Tab 1 is showing the offline snapshot ({source}). Per-rule heatmap "
-            f"values are not stored in the snapshot, so the heatmap is blank in "
-            f"OFFLINE mode."
+        st.subheader("Rule Activation Heatmap")
+        RULES = ["rule1_low_cpu", "rule2_memory_leak", "rule3_stuck_process",
+                 "rule4_network_timeout", "rule5_resource_imbalance"]
+        RULE_LABELS = ["Rule 1\nLow CPU\n35%", "Rule 2\nMem Leak\n25%",
+                       "Rule 3\nStuck\n15%", "Rule 4\nNetwork\n15%", "Rule 5\nImbalance\n10%"]
+
+        matrix     = [[r["rules"].get(rn, 0.0) for rn in RULES] for r in results]
+        row_labels = [r["container"] for r in results]
+
+        fig2 = go.Figure(go.Heatmap(
+            z=matrix, x=RULE_LABELS, y=row_labels,
+            colorscale="RdYlGn", reversescale=True, zmin=0, zmax=1,
+            text=[[f"{v:.2f}" for v in row] for row in matrix],
+            texttemplate="%{text}",
+        ))
+        fig2.update_layout(
+            title="Which rule triggered for each container?",
+            height=340, plot_bgcolor="#0d1117",
+            paper_bgcolor="#0d1117", font_color="#e0e0e0",
         )
+        st.plotly_chart(fig2, use_container_width=True)
 
-    zombies   = [r for r in results if r["classification"] == "zombie"]
-    potential = [r for r in results if r["classification"] == "potential_zombie"]
-    normal    = [r for r in results if r["classification"] == "normal"]
+        if zombies or potential:
+            st.subheader("Detected Containers — Details")
+            for r in zombies + potential:
+                label, desc = ZOMBIE_DESCRIPTIONS.get(r["container"], ("", ""))
+                badge = "ZOMBIE" if r["classification"] == "zombie" else "POTENTIAL"
+                with st.expander(
+                    f"{badge}: {r['container']}  |  Score {r['score']:.1f}/100  |  {label}"
+                ):
+                    st.write(f"**Real-world archetype:** {desc}")
+                    df_rules = pd.DataFrame([
+                        {"Rule": k, "Score": round(v, 4),
+                         "Triggered": "YES" if v > 0.05 else "no"}
+                        for k, v in r["rules"].items()
+                    ])
+                    st.dataframe(df_rules, use_container_width=True, hide_index=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Containers Analysed", len(results))
-    c2.metric("Zombies Detected",    len(zombies))
-    c3.metric("Potential Zombies",   len(potential))
-    c4.metric("Normal",              len(normal))
-
-    st.divider()
-
-    # Score bar chart
-    names  = [r["container"] for r in results]
-    scores = [r["score"]     for r in results]
-    colors = [
-        CLR_ZOMBIE if r["classification"] == "zombie"
-        else CLR_POTENTIAL if r["classification"] == "potential_zombie"
-        else CLR_NORMAL
-        for r in results
-    ]
-
-    fig = go.Figure(go.Bar(
-        x=scores, y=names, orientation="h",
-        marker_color=colors,
-        text=[f"{s:.1f}" for s in scores], textposition="outside",
-    ))
-    fig.add_vline(x=60, line_dash="dash", line_color=CLR_ZOMBIE,
-                  annotation_text="Zombie  >=60")
-    fig.add_vline(x=30, line_dash="dash", line_color=CLR_POTENTIAL,
-                  annotation_text="Potential  >=30")
-    fig.update_layout(
-        title="Heuristic Composite Score per Container (0–100)",
-        xaxis_title="Zombie Score", yaxis_title="",
-        xaxis_range=[0, 115], height=400,
-        plot_bgcolor="#0d1117", paper_bgcolor="#0d1117", font_color="#e0e0e0",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Rule heatmap
-    st.subheader("Rule Activation Heatmap")
-    RULES = ["rule1_low_cpu", "rule2_memory_leak", "rule3_stuck_process",
-             "rule4_network_timeout", "rule5_resource_imbalance"]
-    RULE_LABELS = ["Rule 1\nLow CPU\n35%", "Rule 2\nMem Leak\n25%",
-                   "Rule 3\nStuck\n15%", "Rule 4\nNetwork\n15%", "Rule 5\nImbalance\n10%"]
-
-    matrix     = [[r["rules"].get(rn, 0.0) for rn in RULES] for r in results]
-    row_labels = [r["container"] for r in results]
-
-    fig2 = go.Figure(go.Heatmap(
-        z=matrix, x=RULE_LABELS, y=row_labels,
-        colorscale="RdYlGn", reversescale=True, zmin=0, zmax=1,
-        text=[[f"{v:.2f}" for v in row] for row in matrix],
-        texttemplate="%{text}",
-    ))
-    fig2.update_layout(
-        title="Which rule triggered for each container?",
-        height=340, plot_bgcolor="#0d1117",
-        paper_bgcolor="#0d1117", font_color="#e0e0e0",
-    )
-    st.plotly_chart(fig2, use_container_width=True)
-
-    # Zombie detail cards
-    if zombies or potential:
-        st.subheader("Detected Containers — Details")
-        for r in zombies + potential:
-            label, desc = ZOMBIE_DESCRIPTIONS.get(r["container"], ("", ""))
-            badge = "ZOMBIE" if r["classification"] == "zombie" else "POTENTIAL"
-            with st.expander(
-                f"{badge}: {r['container']}  |  Score {r['score']:.1f}/100  |  {label}"
-            ):
-                st.write(f"**Real-world archetype:** {desc}")
-                df_rules = pd.DataFrame([
-                    {"Rule": k, "Score": round(v, 4),
-                     "Triggered": "YES" if v > 0.05 else "no"}
-                    for k, v in r["rules"].items()
-                ])
-                st.dataframe(df_rules, use_container_width=True, hide_index=True)
+    render_live_detection()
 
 # =============================================================================
-# TAB 2 — THRESHOLD vs HEURISTIC COMPARISON
+# TAB 2 — THRESHOLD vs HEURISTIC COMPARISON (live fragment for live scores)
 # =============================================================================
 with tab2:
+  @st.fragment(run_every=FRAGMENT_INTERVAL)
+  def render_threshold_comparison():
     st.subheader("Heuristic vs. Naive Threshold")
     st.caption("Baseline: `CPU < 5% for > 30 min → zombie`. Same 7 canonical containers.")
 
@@ -453,6 +461,8 @@ with tab2:
          "Heuristic": "ZOMBIE (Rule 3 detects spike-then-idle pattern, score 59.7)"},
     ])
     st.dataframe(fp_fn, use_container_width=True, hide_index=True)
+
+  render_threshold_comparison()
 
 # =============================================================================
 # TAB 3 — ENERGY & COST IMPACT
