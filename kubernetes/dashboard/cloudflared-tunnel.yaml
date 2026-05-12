@@ -1,10 +1,14 @@
-# Free HTTPS layer in front of the dashboard via Cloudflare quick-tunnel.
-# No CF account, no domain, no inbound firewall change required. The pod
-# initiates an outbound connection to Cloudflare and gets back a public
-# https://*.trycloudflare.com URL printed in the pod logs.
+# Free HTTPS layer for the dashboard AND Prometheus via Cloudflare quick-tunnel.
+# Two cloudflared containers share one pod (saves a pod-IP slot on the small
+# EKS nodes). Each initiates its own outbound tunnel to Cloudflare and gets
+# back a public https://*.trycloudflare.com URL printed in its logs.
+#
+# WARNING: Prometheus has no built-in auth. The Prometheus URL exposes every
+# metric in the cluster to anyone who finds it. Demo / short-lived use only.
 #
 # Apply:    kubectl apply -f kubernetes/dashboard/cloudflared-tunnel.yaml
-# Get URL:  kubectl logs -n zombie-detector deployment/cloudflared | grep trycloudflare.com
+# Dashboard URL: kubectl logs -n zombie-detector deployment/cloudflared -c cloudflared | grep trycloudflare.com
+# Prometheus URL: kubectl logs -n zombie-detector deployment/cloudflared -c cloudflared-prom | grep trycloudflare.com
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,6 +18,11 @@ metadata:
     app: cloudflared
 spec:
   replicas: 1
+  # Recreate so the old pod is killed before the new one is scheduled.
+  # Required on small EKS nodes that sit near the pod-IP cap; without it
+  # the rolling-update surge can't schedule the new pod.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cloudflared
@@ -37,8 +46,27 @@ spec:
               name: metrics
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 25m
+              memory: 32Mi
             limits:
-              cpu: 200m
-              memory: 128Mi
+              cpu: 100m
+              memory: 96Mi
+        - name: cloudflared-prom
+          image: cloudflare/cloudflared:2024.10.1
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --metrics
+            - 0.0.0.0:2001
+            - --url
+            - http://prometheus-server.monitoring.svc.cluster.local:9090
+          ports:
+            - containerPort: 2001
+              name: metrics-prom
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 96Mi

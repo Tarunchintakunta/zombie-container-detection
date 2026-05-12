@@ -4,12 +4,16 @@ A lightweight, transparent, rule-based system for detecting zombie containers in
 
 **Author:** Anurag Baiju (23409223) — MSc Cloud Computing, National College of Ireland
 
-## Live demo dashboard (public)
+## Live demo URLs (public)
 
-**Primary URL (HTTPS, works from anywhere):**
-**https://school-same-sporting-api.trycloudflare.com**
+**Dashboard (HTTPS, works from anywhere):**
+**https://revolutionary-term-poll-under.trycloudflare.com**
 
-**Backup URL (HTTP only, AWS direct):**
+**Prometheus (HTTPS, raw PromQL queries):**
+**https://grant-nursing-notebook-gnu.trycloudflare.com**
+> No auth — demo cluster only. Tear down before leaving the cluster idle.
+
+**Dashboard backup (HTTP only, AWS direct):**
 http://adf421f534eea449a9e5d8d39e7ec499-327316410.us-east-1.elb.amazonaws.com
 
 Hosted on the live AWS EKS cluster `zombie-detector-cluster` (us-east-1). The dashboard pod runs inside the cluster and reads Prometheus directly over Kubernetes service discovery, so every metric on screen is **real-time data scraped at 15-second intervals** — no fake or cached values. Auto-refreshes every 30 s. Stays online while the cluster is up.
